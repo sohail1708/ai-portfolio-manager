@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Portfolio state (SQLite DB created at runtime, contains trade history)
+portfolio_state.db
+portfolio_state.db-journal
+portfolio_state.db-shm
+portfolio_state.db-wal
+
 # C extensions
 *.so
 

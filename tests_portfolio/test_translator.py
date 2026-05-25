@@ -1,4 +1,4 @@
-"""Tests for portfolio.executor.translator — parser + sizing policy."""
+"""Tests for portfolio.executor.translator — 5-tier parser + sizing policy."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import pytest
 
 from portfolio.executor.alpaca_client import Position
 from portfolio.executor.translator import (
-    OrderIntent,
     ParsedDecision,
     TranslatorConfig,
     TranslatorContext,
@@ -15,72 +14,90 @@ from portfolio.executor.translator import (
 )
 
 
-# Sample text matching the format we saw in the upstream smoke run.
+# Sample matching the Portfolio Manager's actual rendered output
+# (tradingagents/agents/schemas.py::render_pm_decision).
 SAMPLE_BUY = """
-**Action**: Buy
+**Rating**: Buy
 
-**Reasoning**: The plan supports an Overweight stance in NVDA. RSI is mid-50s, MACD positive.
+**Executive Summary**: Strong fundamentals and AI tailwind support full conviction.
 
-**Stop Loss**: 76.0
+**Investment Thesis**: NVDA dominates AI hardware. Margins remain elite at 65%.
 
-**Position Sizing**: Add incrementally toward a 4-5% NAV single-name risk cap; start with 40%.
+**Price Target**: 165.50
 
-FINAL TRANSACTION PROPOSAL: **BUY**
+**Time Horizon**: 3-6 months
 """
 
-SAMPLE_SELL = """
-**Action**: Sell
+SAMPLE_OVERWEIGHT = """
+**Rating**: Overweight
 
-**Reasoning**: Weakening fundamentals.
+**Executive Summary**: Favorable outlook, incremental add.
 
-**Stop Loss**: 145.50
-
-**Position Sizing**: Close full position.
-
-FINAL TRANSACTION PROPOSAL: **SELL**
+**Investment Thesis**: Solid setup but valuation rich.
 """
 
 SAMPLE_HOLD = """
-**Action**: Hold
+**Rating**: Hold
 
-**Reasoning**: Wait for clearer signal.
+**Executive Summary**: Wait for clearer signal.
 
-FINAL TRANSACTION PROPOSAL: **HOLD**
+**Investment Thesis**: Mixed indicators.
+"""
+
+SAMPLE_UNDERWEIGHT = """
+**Rating**: Underweight
+
+**Executive Summary**: Weakening signals; trim exposure.
+
+**Investment Thesis**: Tighter margins ahead.
+"""
+
+SAMPLE_SELL = """
+**Rating**: Sell
+
+**Executive Summary**: Exit position.
+
+**Investment Thesis**: Multiple warning signs.
 """
 
 
 class TestParseDecision:
     def test_buy_full_fields(self):
         d = parse_decision(SAMPLE_BUY)
-        assert d.action == "BUY"
-        assert d.stop_loss == 76.0
-        assert d.reasoning is not None
-        assert "Overweight stance" in d.reasoning
-        assert d.raw_sizing_text is not None
-        assert "4-5% NAV" in d.raw_sizing_text
+        assert d.rating == "Buy"
+        assert d.executive_summary is not None
+        assert "Strong fundamentals" in d.executive_summary
+        assert d.investment_thesis is not None
+        assert "NVDA dominates" in d.investment_thesis
+        assert d.price_target == 165.50
+        assert d.time_horizon == "3-6 months"
 
-    def test_sell_with_decimal_stop(self):
-        d = parse_decision(SAMPLE_SELL)
-        assert d.action == "SELL"
-        assert d.stop_loss == 145.50
+    def test_overweight_no_price_target(self):
+        d = parse_decision(SAMPLE_OVERWEIGHT)
+        assert d.rating == "Overweight"
+        assert d.price_target is None
+        assert d.time_horizon is None
 
-    def test_hold_no_stop_loss(self):
+    def test_hold(self):
         d = parse_decision(SAMPLE_HOLD)
-        assert d.action == "HOLD"
-        assert d.stop_loss is None
+        assert d.rating == "Hold"
 
-    def test_strips_commas_in_stop_loss(self):
-        d = parse_decision("FINAL TRANSACTION PROPOSAL: BUY\n**Stop Loss**: 1,234.56")
-        assert d.stop_loss == 1234.56
+    def test_underweight(self):
+        d = parse_decision(SAMPLE_UNDERWEIGHT)
+        assert d.rating == "Underweight"
 
-    def test_raises_when_no_action(self):
-        with pytest.raises(ValueError):
-            parse_decision("no action here")
+    def test_sell(self):
+        d = parse_decision(SAMPLE_SELL)
+        assert d.rating == "Sell"
 
-    def test_falls_back_to_action_line_when_no_final(self):
-        # Some upstream variants only emit "**Action**: Buy" without FINAL.
-        d = parse_decision("**Action**: Buy\nrationale here")
-        assert d.action == "BUY"
+    def test_defaults_to_hold_when_no_rating(self):
+        # Upstream's parse_rating defaults to "Hold" rather than raising.
+        d = parse_decision("no rating mentioned")
+        assert d.rating == "Hold"
+
+    def test_strips_commas_in_price_target(self):
+        d = parse_decision("**Rating**: Buy\n**Price Target**: 1,234.56")
+        assert d.price_target == 1234.56
 
 
 class TestTranslateBuy:
@@ -89,70 +106,65 @@ class TestTranslateBuy:
             nav=nav, cash=cash, buying_power=cash, current_position=position
         )
 
+    def _decision(self, rating):
+        return ParsedDecision(
+            rating=rating,
+            executive_summary=None,
+            investment_thesis=None,
+            price_target=None,
+            time_horizon=None,
+        )
+
     def test_fresh_buy_targets_5pct_of_nav(self):
-        decision = ParsedDecision(action="BUY", stop_loss=None, reasoning=None, raw_sizing_text=None)
-        intent = translate(ticker="NVDA", decision=decision, ctx=self._ctx())
+        intent = translate(ticker="NVDA", decision=self._decision("Buy"), ctx=self._ctx())
         assert intent is not None
         assert intent.side == "buy"
         assert intent.notional == 5_000.0
-        assert intent.qty is None
+        assert "buy" in intent.reason
+
+    def test_fresh_overweight_targets_2_5pct_of_nav(self):
+        intent = translate(ticker="NVDA", decision=self._decision("Overweight"), ctx=self._ctx())
+        assert intent is not None
+        assert intent.notional == 2_500.0
+        assert "overweight" in intent.reason
 
     def test_buy_caps_to_buying_power(self):
-        decision = ParsedDecision(action="BUY", stop_loss=None, reasoning=None, raw_sizing_text=None)
         intent = translate(
             ticker="NVDA",
-            decision=decision,
+            decision=self._decision("Buy"),
             ctx=self._ctx(nav=100_000, cash=2_000),
         )
         assert intent is not None
         assert intent.notional == 2_000.0
 
     def test_buy_skipped_when_already_at_cap(self):
-        # Already at 20% (the default cap) of a $100k NAV → no add.
         existing = Position(
             ticker="NVDA", qty=200, avg_entry_price=100, market_value=20_000, unrealized_pl=0
         )
-        decision = ParsedDecision(action="BUY", stop_loss=None, reasoning=None, raw_sizing_text=None)
         intent = translate(
-            ticker="NVDA", decision=decision, ctx=self._ctx(position=existing)
+            ticker="NVDA", decision=self._decision("Buy"), ctx=self._ctx(position=existing)
         )
         assert intent is None
 
-    def test_buy_tops_up_below_target(self):
-        # Position is at 3% of NAV; target is 5% → top up $2k.
-        existing = Position(
-            ticker="NVDA", qty=30, avg_entry_price=100, market_value=3_000, unrealized_pl=0
-        )
-        decision = ParsedDecision(action="BUY", stop_loss=None, reasoning=None, raw_sizing_text=None)
-        intent = translate(
-            ticker="NVDA", decision=decision, ctx=self._ctx(position=existing)
-        )
-        assert intent is not None
-        assert intent.notional == 2_000.0
-
-    def test_buy_adds_toward_cap_when_above_target(self):
-        # Position at 7% (above 5% target, below 20% cap) → add toward cap.
+    def test_overweight_above_target_adds_toward_cap(self):
+        # Position at 7% (above 2.5% overweight target, below 20% cap) → top up to cap.
         existing = Position(
             ticker="NVDA", qty=70, avg_entry_price=100, market_value=7_000, unrealized_pl=0
         )
-        decision = ParsedDecision(action="BUY", stop_loss=None, reasoning=None, raw_sizing_text=None)
         intent = translate(
-            ticker="NVDA", decision=decision, ctx=self._ctx(position=existing)
+            ticker="NVDA", decision=self._decision("Overweight"), ctx=self._ctx(position=existing)
         )
         assert intent is not None
-        # cap_value (20k) - current (7k) = 13k
-        assert intent.notional == 13_000.0
+        assert intent.notional == 13_000.0  # cap (20k) - current (7k)
 
     def test_buy_skipped_below_min_notional(self):
-        cfg = TranslatorConfig(target_position_pct_nav=0.05, min_trade_notional=25.0)
-        # Position at 4.99% of NAV; top-up would be $10 → below min.
+        cfg = TranslatorConfig(buy_pct_nav=0.05, min_trade_notional=25.0)
         existing = Position(
             ticker="NVDA", qty=49.9, avg_entry_price=100, market_value=4_990, unrealized_pl=0
         )
-        decision = ParsedDecision(action="BUY", stop_loss=None, reasoning=None, raw_sizing_text=None)
         intent = translate(
             ticker="NVDA",
-            decision=decision,
+            decision=self._decision("Buy"),
             ctx=self._ctx(position=existing),
             cfg=cfg,
         )
@@ -165,25 +177,49 @@ class TestTranslateSell:
             nav=100_000, cash=50_000, buying_power=50_000, current_position=position
         )
 
+    def _decision(self, rating):
+        return ParsedDecision(
+            rating=rating,
+            executive_summary=None,
+            investment_thesis=None,
+            price_target=None,
+            time_horizon=None,
+        )
+
     def test_sell_closes_full_position(self):
         existing = Position(
             ticker="NVDA", qty=37.5, avg_entry_price=100, market_value=4_000, unrealized_pl=200
         )
-        decision = ParsedDecision(action="SELL", stop_loss=None, reasoning=None, raw_sizing_text=None)
-        intent = translate(ticker="NVDA", decision=decision, ctx=self._ctx(existing))
+        intent = translate(ticker="NVDA", decision=self._decision("Sell"), ctx=self._ctx(existing))
         assert intent is not None
         assert intent.side == "sell"
         assert intent.qty == 37.5
         assert intent.notional is None
 
+    def test_underweight_trims_half_by_default(self):
+        existing = Position(
+            ticker="NVDA", qty=40, avg_entry_price=100, market_value=4_000, unrealized_pl=0
+        )
+        intent = translate(ticker="NVDA", decision=self._decision("Underweight"), ctx=self._ctx(existing))
+        assert intent is not None
+        assert intent.side == "sell"
+        assert intent.qty == 20.0
+        assert "trim" in intent.reason
+
     def test_sell_with_no_position_is_noop(self):
-        decision = ParsedDecision(action="SELL", stop_loss=None, reasoning=None, raw_sizing_text=None)
-        intent = translate(ticker="NVDA", decision=decision, ctx=self._ctx(None))
+        intent = translate(ticker="NVDA", decision=self._decision("Sell"), ctx=self._ctx(None))
+        assert intent is None
+
+    def test_underweight_with_no_position_is_noop(self):
+        intent = translate(ticker="NVDA", decision=self._decision("Underweight"), ctx=self._ctx(None))
         assert intent is None
 
 
 class TestTranslateHold:
     def test_hold_returns_none(self):
-        decision = ParsedDecision(action="HOLD", stop_loss=None, reasoning=None, raw_sizing_text=None)
         ctx = TranslatorContext(nav=100_000, cash=50_000, buying_power=50_000, current_position=None)
+        decision = ParsedDecision(
+            rating="Hold", executive_summary=None, investment_thesis=None,
+            price_target=None, time_horizon=None,
+        )
         assert translate(ticker="NVDA", decision=decision, ctx=ctx) is None
