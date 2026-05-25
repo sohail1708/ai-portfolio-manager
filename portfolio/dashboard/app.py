@@ -144,9 +144,14 @@ def trading_days_between(start_exclusive: date, end_exclusive: date) -> int:
 
 
 def day_label() -> tuple[str, str]:
+    """Counter: trading days from tomorrow (inclusive) until launch (exclusive).
+
+    On Mon May 25 (Memorial Day): Tue 26, Wed 27, Thu 28, Fri 29 → T-4.
+    On Tue May 26 (post-run):     Wed 27, Thu 28, Fri 29           → T-3.
+    """
     today = date.today()
     if today < LAUNCH_DATE:
-        n = trading_days_between(today - timedelta(days=1), LAUNCH_DATE)
+        n = trading_days_between(today, LAUNCH_DATE)
         return f"Day: T-{n}", f"{n} trading day{'s' if n != 1 else ''} until June 1 launch"
     if today > END_DATE:
         return "Day: Final", "Run complete — see Memory & Learning for post-mortem"
