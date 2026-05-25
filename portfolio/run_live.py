@@ -15,6 +15,7 @@ from datetime import date
 
 from dotenv import load_dotenv
 
+from portfolio.agents.qqq_aware_graph import QQQAwareGraph
 from portfolio.executor.alpaca_client import AlpacaClient
 from portfolio.executor.translator import (
     OrderIntent,
@@ -25,7 +26,6 @@ from portfolio.executor.translator import (
 )
 from portfolio.state import store
 from tradingagents.default_config import DEFAULT_CONFIG
-from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 
 def run_one(ticker: str, trade_date: str, *, dry_run: bool = False) -> int:
@@ -42,8 +42,8 @@ def run_one(ticker: str, trade_date: str, *, dry_run: bool = False) -> int:
 
     print(f"[run_live] {ticker} on {trade_date} (dry_run={dry_run})")
 
-    print("[run_live] running TradingAgents pipeline...")
-    ta = TradingAgentsGraph(debug=False, config=config)
+    print("[run_live] running TradingAgents pipeline (QQQ-aware reflection)...")
+    ta = QQQAwareGraph(debug=False, config=config)
     final_state, _ = ta.propagate(ticker, trade_date)
     decision_text = final_state["final_trade_decision"]
 

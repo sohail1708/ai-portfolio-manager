@@ -344,6 +344,94 @@ def render_daily_detail(db_path: str, starting_cash: float) -> None:
         st.divider()
 
 
+# ─── Tab 3: Memory & Learning ─────────────────────────────────────────────────
+
+
+def _default_memory_path() -> str:
+    return os.environ.get(
+        "TRADINGAGENTS_MEMORY_LOG_PATH",
+        os.path.expanduser("~/.tradingagents/memory/trading_memory.md"),
+    )
+
+
+def _parse_memory_log(path: str) -> list[dict]:
+    """Parse upstream's markdown memory log into per-entry dicts.
+
+    Each entry starts with a header like:
+      [2024-05-10 | NVDA | Overweight | +2.9% | +1.2% | 5d]
+    or, for unresolved entries:
+      [2024-05-10 | NVDA | Overweight | pending]
+    """
+    if not os.path.exists(path):
+        return []
+    raw = open(path).read()
+    chunks = [c.strip() for c in raw.split("<!-- ENTRY_END -->") if c.strip()]
+    out = []
+    for chunk in chunks:
+        lines = chunk.split("\n", 1)
+        if not lines or not lines[0].startswith("["):
+            continue
+        header = lines[0].strip("[]").strip()
+        parts = [p.strip() for p in header.split("|")]
+        entry: dict = {
+            "date": parts[0] if len(parts) > 0 else None,
+            "ticker": parts[1] if len(parts) > 1 else None,
+            "rating": parts[2] if len(parts) > 2 else None,
+            "raw_return": parts[3] if len(parts) > 3 else None,
+            "alpha": parts[4] if len(parts) > 4 else None,
+            "holding": parts[5] if len(parts) > 5 else None,
+            "status": "pending" if "pending" in header.lower() else "resolved",
+            "body": lines[1] if len(lines) > 1 else "",
+        }
+        out.append(entry)
+    return out
+
+
+def render_memory(starting_cash: float) -> None:
+    path = _default_memory_path()
+    st.caption(f"Source: {path}")
+
+    entries = _parse_memory_log(path)
+    if not entries:
+        st.info(
+            "Memory log is empty. It will populate automatically as the agent "
+            "makes decisions — each new run pulls in past lessons from prior "
+            "same-ticker decisions and writes a reflection once price data is "
+            "available."
+        )
+        return
+
+    resolved = [e for e in entries if e["status"] == "resolved"]
+    pending = [e for e in entries if e["status"] == "pending"]
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total memories", len(entries))
+    col2.metric("Resolved (have outcome)", len(resolved))
+    col3.metric("Pending (awaiting price data)", len(pending))
+
+    st.markdown(
+        "These are the lessons fed to the Portfolio Manager before each new "
+        "decision. Alpha is measured against **QQQ** (our benchmark)."
+    )
+
+    # Resolved entries first (with reflection)
+    st.subheader("Resolved decisions — what the agent learned")
+    if not resolved:
+        st.info("No resolved entries yet. Returns become available ~5 trading days after a decision.")
+    for e in reversed(resolved):  # newest first
+        with st.expander(
+            f"{e['date']} · {e['ticker']} · {e['rating']} · "
+            f"alpha {e['alpha']} (raw {e['raw_return']}, held {e['holding']})"
+        ):
+            st.markdown(e["body"])
+
+    if pending:
+        st.subheader("Pending decisions — waiting for outcome")
+        for e in reversed(pending):
+            with st.expander(f"{e['date']} · {e['ticker']} · {e['rating']} (pending)"):
+                st.markdown(e["body"])
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 
@@ -366,11 +454,15 @@ def main() -> None:
         st.warning(f"No DB at {db_path} yet. Run `python -m portfolio.run_live <TICKER>` first.")
         st.stop()
 
-    tab1, tab2 = st.tabs(["Overview", "Daily detail (for reels)"])
+    tab1, tab2, tab3 = st.tabs(
+        ["Overview", "Daily detail (for reels)", "Memory & Learning"]
+    )
     with tab1:
         render_overview(db_path, starting_cash)
     with tab2:
         render_daily_detail(db_path, starting_cash)
+    with tab3:
+        render_memory(starting_cash)
 
 
 if __name__ == "__main__":
