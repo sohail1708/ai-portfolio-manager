@@ -25,7 +25,7 @@ From the **repo root** (not from `deploy/`):
 ```bash
 # 1. Launch the app (pick a unique name when prompted, e.g. "sohail-ai-portfolio")
 fly launch \
-    --config deploy/fly.toml \
+    --config fly.toml \
     --dockerfile deploy/Dockerfile \
     --no-deploy
 
@@ -47,7 +47,7 @@ fly secrets set \
     PORTFOLIO_RUN_CRON="0 16 * * 1-5"
 
 # 4. Deploy.
-fly deploy --config deploy/fly.toml
+fly deploy --config fly.toml
 ```
 
 After deploy completes you'll get a URL like:
@@ -60,7 +60,7 @@ That's the dashboard. Visit it — Overview tab should load immediately
 ## Redeploying after code changes
 
 ```bash
-fly deploy --config deploy/fly.toml
+fly deploy --config fly.toml
 ```
 That's it. State on `/data` is preserved.
 
