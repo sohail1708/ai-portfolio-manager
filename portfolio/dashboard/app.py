@@ -28,7 +28,7 @@ st.set_page_config(
 def load_nav(db_path: str) -> pd.DataFrame:
     conn = store.connect(db_path)
     df = pd.read_sql_query(
-        "SELECT snapshot_date, portfolio_value, cash, equity, spy_close "
+        "SELECT snapshot_date, portfolio_value, cash, equity, spy_close, qqq_close "
         "FROM nav_history ORDER BY snapshot_date",
         conn,
     )
@@ -74,12 +74,15 @@ def load_trades(db_path: str, limit: int = 50) -> pd.DataFrame:
 
 
 def compute_benchmark(nav: pd.DataFrame, starting_cash: float) -> pd.DataFrame:
-    """Compute 'what if we held SPY from day 1' equivalent NAV."""
-    if nav.empty or nav["spy_close"].dropna().empty:
-        return nav.assign(spy_equivalent=None)
-    first_spy = nav["spy_close"].dropna().iloc[0]
-    spy_equivalent = starting_cash * (nav["spy_close"] / first_spy)
-    return nav.assign(spy_equivalent=spy_equivalent)
+    """Compute 'what if we held QQQ (or SPY) from day 1' equivalent NAVs."""
+    df = nav.copy()
+    for col, out in (("qqq_close", "qqq_equivalent"), ("spy_close", "spy_equivalent")):
+        if col in df.columns and df[col].dropna().any():
+            first = df[col].dropna().iloc[0]
+            df[out] = starting_cash * (df[col] / first)
+        else:
+            df[out] = None
+    return df
 
 
 def main() -> None:
@@ -87,7 +90,7 @@ def main() -> None:
     starting_cash = float(os.environ.get("PORTFOLIO_STARTING_CASH", "100000"))
 
     st.title("AI Portfolio Manager")
-    st.caption("Live paper-trading vs SPY for June 2026.")
+    st.caption("Live paper-trading vs QQQ for June 2026 (SPY shown for context).")
 
     with st.sidebar:
         st.header("Config")
@@ -104,25 +107,32 @@ def main() -> None:
     nav = load_nav(db_path)
     nav = compute_benchmark(nav, starting_cash)
 
-    # Headline metrics
+    # Headline metrics — vs QQQ is primary, vs SPY is context.
     col1, col2, col3, col4 = st.columns(4)
     if not nav.empty:
         latest_value = float(nav["portfolio_value"].iloc[-1])
+        latest_qqq_eq = float(nav["qqq_equivalent"].iloc[-1]) if nav["qqq_equivalent"].notna().any() else None
         latest_spy_eq = float(nav["spy_equivalent"].iloc[-1]) if nav["spy_equivalent"].notna().any() else None
-        col1.metric("Portfolio NAV", f"${latest_value:,.0f}",
-                    f"{(latest_value - starting_cash) / starting_cash * 100:+.2f}%")
+        col1.metric(
+            "Portfolio NAV",
+            f"${latest_value:,.0f}",
+            f"{(latest_value - starting_cash) / starting_cash * 100:+.2f}%",
+        )
+        if latest_qqq_eq:
+            qqq_pct = (latest_value - latest_qqq_eq) / latest_qqq_eq * 100
+            col2.metric(
+                "vs QQQ", f"{qqq_pct:+.2f}%", f"${latest_value - latest_qqq_eq:+,.0f}"
+            )
         if latest_spy_eq:
-            delta = latest_value - latest_spy_eq
-            col2.metric("vs SPY ($)", f"${delta:+,.0f}")
-            col3.metric("vs SPY (%)",
-                        f"{(latest_value - latest_spy_eq) / latest_spy_eq * 100:+.2f}%")
+            spy_pct = (latest_value - latest_spy_eq) / latest_spy_eq * 100
+            col3.metric("vs SPY (context)", f"{spy_pct:+.2f}%")
         days_in_june = (date.today() - date(2026, 6, 1)).days
         col4.metric("Day of June run", f"{max(0, days_in_june)} / 30")
     else:
         col1.metric("Portfolio NAV", "—")
 
-    # NAV curve
-    st.subheader("NAV vs SPY-equivalent")
+    # NAV curve — portfolio vs QQQ (primary) and SPY (context).
+    st.subheader("NAV vs QQQ-equivalent (SPY for context)")
     if nav.empty:
         st.info("No NAV snapshots yet — the scheduler logs one per day.")
     else:
@@ -131,10 +141,16 @@ def main() -> None:
             x=nav["snapshot_date"], y=nav["portfolio_value"],
             name="Portfolio", line=dict(width=3),
         ))
+        if nav["qqq_equivalent"].notna().any():
+            fig.add_trace(go.Scatter(
+                x=nav["snapshot_date"], y=nav["qqq_equivalent"],
+                name="QQQ-equivalent", line=dict(width=2, dash="dash"),
+            ))
         if nav["spy_equivalent"].notna().any():
             fig.add_trace(go.Scatter(
                 x=nav["snapshot_date"], y=nav["spy_equivalent"],
-                name="SPY-equivalent", line=dict(dash="dash"),
+                name="SPY-equivalent", line=dict(width=1, dash="dot"),
+                opacity=0.6,
             ))
         fig.update_layout(
             height=400, hovermode="x unified",

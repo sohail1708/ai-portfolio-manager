@@ -56,7 +56,8 @@ CREATE TABLE IF NOT EXISTS nav_history (
     portfolio_value REAL NOT NULL,
     cash REAL NOT NULL,
     equity REAL NOT NULL,
-    spy_close REAL
+    spy_close REAL,
+    qqq_close REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_decisions_ticker_date
@@ -77,7 +78,19 @@ def connect(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    # Idempotent column adds for DBs created before the column existed.
+    _try_add_column(conn, "nav_history", "qqq_close", "REAL")
     conn.commit()
+
+
+def _try_add_column(
+    conn: sqlite3.Connection, table: str, column: str, col_type: str
+) -> None:
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
 
 
 @contextmanager
@@ -210,18 +223,20 @@ def log_nav(
     cash: float,
     equity: float,
     spy_close: float | None = None,
+    qqq_close: float | None = None,
 ) -> None:
     conn.execute(
         """
-        INSERT INTO nav_history (snapshot_date, portfolio_value, cash, equity, spy_close)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO nav_history (snapshot_date, portfolio_value, cash, equity, spy_close, qqq_close)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(snapshot_date) DO UPDATE SET
             portfolio_value = excluded.portfolio_value,
             cash = excluded.cash,
             equity = excluded.equity,
-            spy_close = COALESCE(excluded.spy_close, nav_history.spy_close)
+            spy_close = COALESCE(excluded.spy_close, nav_history.spy_close),
+            qqq_close = COALESCE(excluded.qqq_close, nav_history.qqq_close)
         """,
-        (_iso(snapshot_date), portfolio_value, cash, equity, spy_close),
+        (_iso(snapshot_date), portfolio_value, cash, equity, spy_close, qqq_close),
     )
     conn.commit()
 

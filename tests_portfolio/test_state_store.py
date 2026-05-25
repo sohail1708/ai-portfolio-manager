@@ -117,7 +117,7 @@ def test_log_nav_upsert(conn):
         cash=100_000,
         equity=0,
     )
-    # Upsert: same day, add SPY close
+    # Upsert: same day, add SPY + QQQ close
     store.log_nav(
         conn,
         snapshot_date="2026-06-01",
@@ -125,9 +125,37 @@ def test_log_nav_upsert(conn):
         cash=50_000,
         equity=50_500,
         spy_close=580.42,
+        qqq_close=525.10,
     )
     row = conn.execute(
         "SELECT * FROM nav_history WHERE snapshot_date = ?", ("2026-06-01",)
     ).fetchone()
     assert row["portfolio_value"] == 100_500
     assert row["spy_close"] == 580.42
+    assert row["qqq_close"] == 525.10
+
+
+def test_log_nav_partial_benchmark_upsert_preserves_other(conn):
+    store.log_nav(
+        conn,
+        snapshot_date="2026-06-01",
+        portfolio_value=100_000,
+        cash=100_000,
+        equity=0,
+        spy_close=580.0,
+        qqq_close=525.0,
+    )
+    # Upsert later in day with only QQQ — SPY should be preserved.
+    store.log_nav(
+        conn,
+        snapshot_date="2026-06-01",
+        portfolio_value=100_100,
+        cash=99_900,
+        equity=200,
+        qqq_close=526.0,
+    )
+    row = conn.execute(
+        "SELECT * FROM nav_history WHERE snapshot_date = ?", ("2026-06-01",)
+    ).fetchone()
+    assert row["spy_close"] == 580.0
+    assert row["qqq_close"] == 526.0
