@@ -20,12 +20,22 @@ RUN apt-get update -qq \
 
 WORKDIR /app
 
-# Install Python deps first (cached layer).
-COPY pyproject.toml uv.lock ./
-RUN pip install --no-cache-dir uv && uv pip install --system .
+# Install uv, then sync deps from the LOCK FILE (not pyproject.toml) so we
+# get the exact versions tested locally. Critical: yfinance broke API in 1.x;
+# the lock file pins to 0.2.x which stockstats still understands.
+RUN pip install --no-cache-dir uv
 
-# Now copy source. /app is owned by root but we run as a non-root user.
+COPY pyproject.toml uv.lock ./
+# --frozen: refuse to update the lock; fail if there's drift.
+# --no-dev: skip dev-only groups (pytest etc).
+# --no-install-project: don't install the project itself yet (we copy source after).
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Now copy source and install the project on top of the synced env.
 COPY . .
+RUN uv sync --frozen --no-dev
+
+ENV PATH="/app/.venv/bin:$PATH"
 
 RUN useradd --create-home --uid 1000 appuser \
     && chmod +x deploy/start.sh
