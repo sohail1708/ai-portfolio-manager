@@ -13,3 +13,9 @@ results
 eval_results
 Dockerfile
 docker-compose.yml
+.pytest_cache
+portfolio_state.db
+portfolio_state.db-journal
+portfolio_state.db-shm
+portfolio_state.db-wal
+*.bak

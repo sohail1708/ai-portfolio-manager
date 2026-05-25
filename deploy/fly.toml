@@ -1,0 +1,46 @@
+# Fly.io config for AI Portfolio Manager.
+# Single machine running both Streamlit (port 8080) and the scheduler daemon.
+# Persistent volume at /data for SQLite + memory log + cache.
+
+app = "ai-portfolio-manager"  # change to your unique name (must be globally unique on fly.io)
+primary_region = "iad"        # US East — close to Alpaca's NY/NJ servers
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+
+# Persistent storage for SQLite, upstream memory log, and yfinance cache.
+[mounts]
+  source = "portfolio_data"
+  destination = "/data"
+
+# HTTP service: Streamlit on 8080 → public URL on 443.
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Keep at least one machine running so the scheduler cron fires reliably.
+  # The dashboard ALSO stays warm — no cold start when visitors arrive.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 50
+    soft_limit = 25
+
+# Small VM — Streamlit + APScheduler + occasional LLM client work fit easily.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpus = 1
+
+# Healthcheck: Streamlit serves a 200 at /_stcore/health by default.
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "30s"
+  timeout = "5s"
+  method = "GET"
+  path = "/_stcore/health"
