@@ -1,6 +1,6 @@
-"""Streamlit dashboard: Overview + per-day decision flowcharts.
+"""Streamlit dashboard — light theme, T-N countdown, side-by-side vs QQQ, architecture view.
 
-Run with:
+Run locally:
     .venv/bin/streamlit run portfolio/dashboard/app.py
 """
 
@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
@@ -19,9 +20,66 @@ from portfolio.state import store
 
 load_dotenv()
 
+LAUNCH_DATE = date(2026, 6, 1)
+END_DATE = date(2026, 6, 30)
+TOTAL_DAYS = 30
+
 st.set_page_config(
-    page_title="AI Portfolio Manager — vs QQQ June 2026",
+    page_title="AI Portfolio Manager — vs QQQ",
     layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# Custom CSS for a clean, light, "dashboard" feel.
+st.markdown(
+    """
+    <style>
+    .day-banner {
+        font-size: 5rem;
+        font-weight: 800;
+        line-height: 1;
+        margin: 0.25rem 0 0.5rem 0;
+        color: #111827;
+        letter-spacing: -0.02em;
+    }
+    .day-sub {
+        color: #6b7280;
+        font-size: 1rem;
+        margin-top: -0.5rem;
+        margin-bottom: 1.5rem;
+    }
+    .metric-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 1.5rem;
+        height: 100%;
+    }
+    .metric-label {
+        color: #6b7280;
+        font-size: 0.875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.5rem;
+    }
+    .metric-value {
+        font-size: 2.75rem;
+        font-weight: 700;
+        color: #111827;
+        line-height: 1.1;
+    }
+    .metric-delta {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-top: 0.4rem;
+    }
+    .delta-pos { color: #059669; }
+    .delta-neg { color: #dc2626; }
+    .delta-neutral { color: #6b7280; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
 
@@ -53,48 +111,47 @@ def load_positions(db_path: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=30)
-def load_decisions_summary(db_path: str, limit: int = 50) -> pd.DataFrame:
+def load_decisions_summary(db_path: str) -> pd.DataFrame:
     conn = store.connect(db_path)
     return pd.read_sql_query(
-        f"SELECT id, created_at, ticker, trade_date, action, "
-        f"substr(reasoning, 1, 200) AS reasoning_preview "
-        f"FROM agent_decisions ORDER BY id DESC LIMIT {int(limit)}",
+        "SELECT created_at, ticker, trade_date, action FROM agent_decisions "
+        "ORDER BY id DESC",
         conn,
     )
 
 
 @st.cache_data(ttl=30)
-def load_trades(db_path: str, limit: int = 50) -> pd.DataFrame:
+def load_trades(db_path: str) -> pd.DataFrame:
     conn = store.connect(db_path)
     return pd.read_sql_query(
-        f"SELECT id, created_at, ticker, side, qty, status, "
-        f"filled_qty, filled_avg_price, alpaca_order_id "
-        f"FROM trades ORDER BY id DESC LIMIT {int(limit)}",
+        "SELECT created_at, ticker, side, qty, status, filled_qty, filled_avg_price "
+        "FROM trades ORDER BY id DESC LIMIT 50",
         conn,
     )
 
 
-@st.cache_data(ttl=30)
-def load_decisions_for_date(db_path: str, trade_date: str) -> pd.DataFrame:
-    conn = store.connect(db_path)
-    return pd.read_sql_query(
-        "SELECT id, ticker, action, reasoning, raw_state "
-        "FROM agent_decisions WHERE trade_date = ? ORDER BY ticker",
-        conn,
-        params=(trade_date,),
-    )
+# ─── Header: T-N countdown / Day-of-30 ────────────────────────────────────────
 
 
-@st.cache_data(ttl=30)
-def list_decision_dates(db_path: str) -> list[str]:
-    conn = store.connect(db_path)
-    rows = conn.execute(
-        "SELECT DISTINCT trade_date FROM agent_decisions ORDER BY trade_date DESC"
-    ).fetchall()
-    return [r[0] for r in rows]
+def trading_days_between(start_exclusive: date, end_exclusive: date) -> int:
+    days = 0
+    d = start_exclusive + timedelta(days=1)
+    while d < end_exclusive:
+        if d.weekday() < 5:  # Mon–Fri
+            days += 1
+        d += timedelta(days=1)
+    return days
 
 
-# ─── Benchmark math ───────────────────────────────────────────────────────────
+def day_label() -> tuple[str, str]:
+    today = date.today()
+    if today < LAUNCH_DATE:
+        n = trading_days_between(today - timedelta(days=1), LAUNCH_DATE)
+        return f"Day: T-{n}", f"{n} trading day{'s' if n != 1 else ''} until June 1 launch"
+    if today > END_DATE:
+        return "Day: Final", "Run complete — see Memory & Learning for post-mortem"
+    day_num = (today - LAUNCH_DATE).days + 1
+    return f"Day: {day_num} of {TOTAL_DAYS}", f"{LAUNCH_DATE} → {END_DATE}"
 
 
 def compute_benchmark(nav: pd.DataFrame, starting_cash: float) -> pd.DataFrame:
@@ -108,6 +165,28 @@ def compute_benchmark(nav: pd.DataFrame, starting_cash: float) -> pd.DataFrame:
     return df
 
 
+def fmt_delta(value: float, kind: str = "pct") -> str:
+    if value is None:
+        return "<span class='metric-delta delta-neutral'>—</span>"
+    cls = "delta-pos" if value > 0 else ("delta-neg" if value < 0 else "delta-neutral")
+    sign = "+" if value > 0 else ""
+    suffix = "%" if kind == "pct" else ""
+    return f"<span class='metric-delta {cls}'>{sign}{value:.2f}{suffix}</span>"
+
+
+def render_metric_card(label: str, value: str, delta_html: str) -> None:
+    st.markdown(
+        f"""
+        <div class="metric-card">
+          <div class="metric-label">{label}</div>
+          <div class="metric-value">{value}</div>
+          {delta_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # ─── Tab 1: Overview ──────────────────────────────────────────────────────────
 
 
@@ -115,233 +194,280 @@ def render_overview(db_path: str, starting_cash: float) -> None:
     nav = load_nav(db_path)
     nav = compute_benchmark(nav, starting_cash)
 
-    col1, col2, col3, col4 = st.columns(4)
-    if not nav.empty:
-        latest_value = float(nav["portfolio_value"].iloc[-1])
-        latest_qqq_eq = float(nav["qqq_equivalent"].iloc[-1]) if nav["qqq_equivalent"].notna().any() else None
-        latest_spy_eq = float(nav["spy_equivalent"].iloc[-1]) if nav["spy_equivalent"].notna().any() else None
-        col1.metric(
-            "Portfolio NAV",
-            f"${latest_value:,.0f}",
-            f"{(latest_value - starting_cash) / starting_cash * 100:+.2f}%",
-        )
-        if latest_qqq_eq:
-            qqq_pct = (latest_value - latest_qqq_eq) / latest_qqq_eq * 100
-            col2.metric("vs QQQ", f"{qqq_pct:+.2f}%", f"${latest_value - latest_qqq_eq:+,.0f}")
-        if latest_spy_eq:
-            spy_pct = (latest_value - latest_spy_eq) / latest_spy_eq * 100
-            col3.metric("vs SPY (context)", f"{spy_pct:+.2f}%")
-        days_in_june = (date.today() - date(2026, 6, 1)).days
-        col4.metric("Day of June run", f"{max(0, days_in_june)} / 30")
-    else:
-        col1.metric("Portfolio NAV", "—")
+    has_data = not nav.empty
 
-    st.subheader("NAV vs QQQ-equivalent (SPY for context)")
-    if nav.empty:
-        st.info("No NAV snapshots yet — the scheduler logs one per day.")
+    if has_data:
+        latest_portfolio = float(nav["portfolio_value"].iloc[-1])
+        portfolio_total_return = (latest_portfolio - starting_cash) / starting_cash * 100
+
+        latest_qqq_eq = (
+            float(nav["qqq_equivalent"].iloc[-1])
+            if nav["qqq_equivalent"].notna().any() else None
+        )
+        qqq_total_return = (
+            (latest_qqq_eq - starting_cash) / starting_cash * 100
+            if latest_qqq_eq else None
+        )
+        alpha = (
+            (latest_portfolio - latest_qqq_eq) / latest_qqq_eq * 100
+            if latest_qqq_eq else None
+        )
     else:
+        latest_portfolio = starting_cash
+        portfolio_total_return = 0.0
+        latest_qqq_eq = starting_cash
+        qqq_total_return = 0.0
+        alpha = 0.0
+
+    # Side-by-side Portfolio vs QQQ comparison.
+    col_p, col_q, col_a = st.columns([1, 1, 1])
+    with col_p:
+        render_metric_card(
+            "Portfolio",
+            f"${latest_portfolio:,.0f}",
+            fmt_delta(portfolio_total_return),
+        )
+    with col_q:
+        render_metric_card(
+            "QQQ Benchmark",
+            f"${latest_qqq_eq:,.0f}" if latest_qqq_eq else "—",
+            fmt_delta(qqq_total_return),
+        )
+    with col_a:
+        render_metric_card(
+            "Alpha (vs QQQ)",
+            f"{alpha:+.2f}%" if alpha is not None else "—",
+            f"<span class='metric-delta {'delta-pos' if alpha and alpha > 0 else 'delta-neg' if alpha and alpha < 0 else 'delta-neutral'}'>"
+            f"${latest_portfolio - latest_qqq_eq:+,.0f}</span>"
+            if latest_qqq_eq else "<span class='metric-delta delta-neutral'>—</span>",
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if not has_data:
+        st.info(
+            "📊 No portfolio data yet. The first scheduled run is **June 1, 2026 at 16:00 ET**. "
+            "Charts will appear here after that."
+        )
+
+    # NAV curve
+    st.subheader("Portfolio value over time")
+    if has_data:
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=nav["snapshot_date"], y=nav["portfolio_value"],
-            name="Portfolio", line=dict(width=3),
+            name="Portfolio", line=dict(color="#1976d2", width=3),
+            mode="lines+markers",
         ))
         if nav["qqq_equivalent"].notna().any():
             fig.add_trace(go.Scatter(
                 x=nav["snapshot_date"], y=nav["qqq_equivalent"],
-                name="QQQ-equivalent", line=dict(width=2, dash="dash"),
+                name="QQQ-equivalent", line=dict(color="#9ca3af", width=2, dash="dash"),
+                mode="lines",
             ))
-        if nav["spy_equivalent"].notna().any():
-            fig.add_trace(go.Scatter(
-                x=nav["snapshot_date"], y=nav["spy_equivalent"],
-                name="SPY-equivalent", line=dict(width=1, dash="dot"), opacity=0.6,
-            ))
-        fig.update_layout(height=400, hovermode="x unified", yaxis_title="$ value", xaxis_title=None)
+        fig.update_layout(
+            height=380, hovermode="x unified",
+            yaxis_title="$ value", xaxis_title=None,
+            paper_bgcolor="white", plot_bgcolor="white",
+            yaxis=dict(gridcolor="#e5e7eb"), xaxis=dict(gridcolor="#e5e7eb"),
+            margin=dict(t=20, b=20, l=20, r=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
         st.plotly_chart(fig, use_container_width=True)
-
-    st.subheader("Current positions")
-    positions = load_positions(db_path)
-    if positions.empty:
-        st.info("No positions snapshotted yet.")
     else:
-        st.dataframe(positions, use_container_width=True, hide_index=True)
+        st.empty()
 
-    left, right = st.columns(2)
-    with left:
-        st.subheader("Recent agent decisions")
-        st.dataframe(load_decisions_summary(db_path), use_container_width=True, hide_index=True)
-    with right:
-        st.subheader("Recent trades")
-        st.dataframe(load_trades(db_path), use_container_width=True, hide_index=True)
+    # Daily returns bar chart + position allocation pie
+    if has_data and len(nav) >= 2:
+        nav_sorted = nav.sort_values("snapshot_date").reset_index(drop=True)
+        nav_sorted["portfolio_daily_return_pct"] = (
+            nav_sorted["portfolio_value"].pct_change() * 100
+        )
+        nav_sorted["qqq_daily_return_pct"] = (
+            nav_sorted["qqq_close"].pct_change() * 100
+            if "qqq_close" in nav_sorted else None
+        )
+
+        col_left, col_right = st.columns([2, 1])
+        with col_left:
+            st.subheader("Daily returns — Portfolio vs QQQ")
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                x=nav_sorted["snapshot_date"],
+                y=nav_sorted["portfolio_daily_return_pct"],
+                name="Portfolio",
+                marker_color="#1976d2",
+            ))
+            fig2.add_trace(go.Bar(
+                x=nav_sorted["snapshot_date"],
+                y=nav_sorted["qqq_daily_return_pct"],
+                name="QQQ",
+                marker_color="#9ca3af",
+            ))
+            fig2.update_layout(
+                height=320, barmode="group",
+                yaxis_title="Daily return %", xaxis_title=None,
+                paper_bgcolor="white", plot_bgcolor="white",
+                yaxis=dict(gridcolor="#e5e7eb"), xaxis=dict(gridcolor="#e5e7eb"),
+                margin=dict(t=20, b=20, l=20, r=20),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        with col_right:
+            positions = load_positions(db_path)
+            st.subheader("Current allocation")
+            if positions.empty:
+                st.info("No positions yet.")
+            else:
+                pos_with_mv = positions.dropna(subset=["market_value"]).copy()
+                if not pos_with_mv.empty:
+                    fig3 = px.pie(
+                        pos_with_mv,
+                        values="market_value",
+                        names="ticker",
+                        color_discrete_sequence=px.colors.qualitative.Set2,
+                    )
+                    fig3.update_traces(textposition="inside", textinfo="percent+label")
+                    fig3.update_layout(
+                        height=320, showlegend=False,
+                        paper_bgcolor="white",
+                        margin=dict(t=20, b=20, l=20, r=20),
+                    )
+                    st.plotly_chart(fig3, use_container_width=True)
+                else:
+                    st.info("Positions present but no market values yet.")
+
+    # Decision distribution
+    decisions = load_decisions_summary(db_path)
+    if not decisions.empty:
+        st.subheader("Decisions by rating")
+        counts = decisions["action"].str.title().value_counts().reindex(
+            ["Buy", "Overweight", "Hold", "Underweight", "Sell"], fill_value=0
+        )
+        fig4 = go.Figure(go.Bar(
+            x=counts.index,
+            y=counts.values,
+            marker_color=["#059669", "#7cb342", "#fbbf24", "#fb923c", "#dc2626"],
+        ))
+        fig4.update_layout(
+            height=260,
+            yaxis_title="Count", xaxis_title=None,
+            paper_bgcolor="white", plot_bgcolor="white",
+            yaxis=dict(gridcolor="#e5e7eb"),
+            margin=dict(t=20, b=20, l=20, r=20),
+            showlegend=False,
+        )
+        st.plotly_chart(fig4, use_container_width=True)
+
+    # Tables below charts (collapsed by default).
+    if not decisions.empty or not load_trades(db_path).empty:
+        with st.expander("Recent decisions & trades"):
+            tab_d, tab_t = st.tabs(["Decisions", "Trades"])
+            with tab_d:
+                st.dataframe(decisions, use_container_width=True, hide_index=True)
+            with tab_t:
+                st.dataframe(load_trades(db_path), use_container_width=True, hide_index=True)
 
 
-# ─── Tab 2: Daily detail ──────────────────────────────────────────────────────
+# ─── Tab 2: Architecture ──────────────────────────────────────────────────────
 
 
-_RATING_COLOR = {
-    "Buy":         "#2e7d32",  # green
-    "Overweight":  "#7cb342",  # light green
-    "Hold":        "#fdd835",  # yellow
-    "Underweight": "#fb8c00",  # orange
-    "Sell":        "#e53935",  # red
+_ARCH_DOT = """
+digraph G {
+  rankdir=TB;
+  bgcolor="white";
+  node [shape=box, style="filled,rounded", fontname="Helvetica", fontsize=11, color="#d1d5db"];
+  edge [color="#9ca3af", arrowsize=0.6];
+
+  ticker [label="Ticker\\n(NVDA, AAPL, …)", shape=oval, fillcolor="#1976d2", fontcolor=white, fontsize=12];
+
+  subgraph cluster_analysts {
+    label="Stage 1 — Analyst Team (parallel)"; style="rounded,dashed"; color="#9ca3af"; fontcolor="#374151";
+    market [label="Market Analyst\\ntechnicals (RSI, MACD, SMA)", fillcolor="#dbeafe"];
+    sentiment [label="Sentiment Analyst\\nReddit + X", fillcolor="#dbeafe"];
+    news [label="News Analyst\\nBloomberg, Yahoo, EODHD", fillcolor="#dbeafe"];
+    fundamentals [label="Fundamentals Analyst\\n10-K, ratios, FCF", fillcolor="#dbeafe"];
+  }
+
+  subgraph cluster_research {
+    label="Stage 2 — Researcher Debate"; style="rounded,dashed"; color="#9ca3af"; fontcolor="#374151";
+    bull [label="Bull Researcher", fillcolor="#fef3c7"];
+    bear [label="Bear Researcher", fillcolor="#fef3c7"];
+    research_mgr [label="Research Manager\\n(synthesizes debate)", fillcolor="#fde68a"];
+  }
+
+  trader [label="Stage 3 — Trader\\nproposes transaction", fillcolor="#d1fae5"];
+
+  subgraph cluster_risk {
+    label="Stage 4 — Risk Management"; style="rounded,dashed"; color="#9ca3af"; fontcolor="#374151";
+    risky [label="Risky Analyst", fillcolor="#fee2e2"];
+    neutral [label="Neutral Analyst", fillcolor="#fee2e2"];
+    safe [label="Safe Analyst", fillcolor="#fee2e2"];
+  }
+
+  pm [label="Stage 5 — Portfolio Manager\\nFinal 5-tier rating", fillcolor="#1976d2", fontcolor=white, fontsize=12];
+
+  translator [label="Our Translator\\nrating → $ sizing\\n(Buy 10% / OW 5% / cap 20%)", shape=box, fillcolor="#e0f2fe", color="#0369a1"];
+  alpaca [label="Alpaca Paper Trading", shape=cylinder, fillcolor="#1f2937", fontcolor=white];
+
+  state [label="SQLite\\n(decisions, trades, NAV)", shape=cylinder, fillcolor="#f3f4f6"];
+  memory [label="Reflection Memory Log\\n(learns 5d-later vs QQQ)", shape=cylinder, fillcolor="#f3f4f6"];
+
+  ticker -> market;
+  ticker -> sentiment;
+  ticker -> news;
+  ticker -> fundamentals;
+
+  market -> bull;
+  market -> bear;
+  sentiment -> bull;
+  sentiment -> bear;
+  news -> bull;
+  news -> bear;
+  fundamentals -> bull;
+  fundamentals -> bear;
+
+  bull -> research_mgr;
+  bear -> research_mgr;
+  research_mgr -> trader;
+  trader -> risky;
+  trader -> neutral;
+  trader -> safe;
+  risky -> pm;
+  neutral -> pm;
+  safe -> pm;
+
+  pm -> translator;
+  translator -> alpaca;
+  translator -> state [style=dashed];
+  pm -> memory [style=dashed];
+  memory -> pm [style=dotted, label="past_context\\non next run", fontsize=9];
 }
+"""
 
 
-def _short(text: str | None, n: int = 90) -> str:
-    if not text:
-        return "(no output)"
-    text = " ".join(text.split())
-    return text[: n - 1] + "…" if len(text) > n else text
-
-
-def build_flowchart_dot(ticker: str, state: dict, rating: str) -> str:
-    """Build a graphviz DOT diagram of the agent flow for one ticker."""
-    inv_debate = state.get("investment_debate_state") or {}
-    risk_debate = state.get("risk_debate_state") or {}
-
-    rating_color = _RATING_COLOR.get(rating, "#bdbdbd")
-
-    def esc(s: str) -> str:
-        return s.replace('"', "'").replace("\n", " ")
-
-    nodes = []
-    nodes.append(f'  ticker [label="{esc(ticker)}\\nTrade date", shape=oval, style=filled, fillcolor="#1976d2", fontcolor=white];')
-
-    # Analysts (4)
-    nodes.append(f'  market [label="Market Analyst\\n{esc(_short(state.get("market_report")))}", style=filled, fillcolor="#e3f2fd"];')
-    nodes.append(f'  sentiment [label="Sentiment Analyst\\n{esc(_short(state.get("sentiment_report")))}", style=filled, fillcolor="#e3f2fd"];')
-    nodes.append(f'  news [label="News Analyst\\n{esc(_short(state.get("news_report")))}", style=filled, fillcolor="#e3f2fd"];')
-    nodes.append(f'  fundamentals [label="Fundamentals Analyst\\n{esc(_short(state.get("fundamentals_report")))}", style=filled, fillcolor="#e3f2fd"];')
-
-    # Researchers (bull/bear)
-    nodes.append(f'  bull [label="Bull Researcher\\n{esc(_short(inv_debate.get("current_response") or inv_debate.get("history")))}", style=filled, fillcolor="#fff8e1"];')
-    nodes.append(f'  bear [label="Bear Researcher\\n{esc(_short(inv_debate.get("bear_history")))}", style=filled, fillcolor="#fff8e1"];')
-
-    # Research Manager / Investment Plan
-    nodes.append(f'  research_mgr [label="Research Manager\\n{esc(_short(state.get("investment_plan")))}", style=filled, fillcolor="#fff3e0"];')
-
-    # Trader
-    nodes.append(f'  trader [label="Trader\\n{esc(_short(state.get("trader_investment_plan")))}", style=filled, fillcolor="#e8f5e9"];')
-
-    # Risk team (3)
-    nodes.append(f'  risky [label="Risky Analyst\\n{esc(_short(risk_debate.get("current_aggressive_response")))}", style=filled, fillcolor="#ffebee"];')
-    nodes.append(f'  neutral [label="Neutral Analyst\\n{esc(_short(risk_debate.get("current_neutral_response")))}", style=filled, fillcolor="#ffebee"];')
-    nodes.append(f'  safe [label="Safe Analyst\\n{esc(_short(risk_debate.get("current_conservative_response")))}", style=filled, fillcolor="#ffebee"];')
-
-    # PM (final)
-    nodes.append(
-        f'  pm [label="Portfolio Manager\\nRATING: {esc(rating).upper()}", '
-        f'shape=box, style="filled,bold", fillcolor="{rating_color}", fontcolor=white, fontsize=14];'
-    )
-
-    edges = """
-      ticker -> market;
-      ticker -> sentiment;
-      ticker -> news;
-      ticker -> fundamentals;
-      market -> bull;
-      market -> bear;
-      sentiment -> bull;
-      sentiment -> bear;
-      news -> bull;
-      news -> bear;
-      fundamentals -> bull;
-      fundamentals -> bear;
-      bull -> research_mgr;
-      bear -> research_mgr;
-      research_mgr -> trader;
-      trader -> risky;
-      trader -> neutral;
-      trader -> safe;
-      risky -> pm;
-      neutral -> pm;
-      safe -> pm;
-    """
-
-    body = "\n".join(nodes) + edges
-    return f'digraph G {{\n  rankdir=TB;\n  node [shape=box, fontname="Helvetica", fontsize=10];\n  edge [color="#999999"];\n{body}\n}}'
-
-
-def render_decision_card(row: pd.Series) -> None:
-    state = {}
-    if row.get("raw_state"):
-        try:
-            state = json.loads(row["raw_state"])
-        except Exception:
-            state = {}
-
-    rating = (row["action"] or "Hold").title()
-    color = _RATING_COLOR.get(rating, "#bdbdbd")
-
+def render_architecture() -> None:
     st.markdown(
-        f"### {row['ticker']} — "
-        f"<span style='color:{color}; font-weight:700'>{rating.upper()}</span>",
-        unsafe_allow_html=True,
+        "**11 LLM agents per ticker per day**, plus our deterministic translator and persistence layer. "
+        "The reflection memory feeds learnings from past trades back into the Portfolio Manager."
     )
+    st.graphviz_chart(_ARCH_DOT, use_container_width=True)
 
-    dot = build_flowchart_dot(row["ticker"], state, rating)
-    st.graphviz_chart(dot, use_container_width=True)
-
-    with st.expander("Full agent reports"):
-        sections = [
-            ("Market Analyst", state.get("market_report")),
-            ("Sentiment Analyst", state.get("sentiment_report")),
-            ("News Analyst", state.get("news_report")),
-            ("Fundamentals Analyst", state.get("fundamentals_report")),
-            ("Research Manager (Investment Plan)", state.get("investment_plan")),
-            ("Trader (Transaction Proposal)", state.get("trader_investment_plan")),
-            ("Portfolio Manager (Final Decision)", state.get("final_trade_decision")),
-        ]
-        for title, content in sections:
-            if content:
-                st.markdown(f"**{title}**")
-                st.markdown(str(content))
-                st.divider()
-
-
-def render_daily_detail(db_path: str, starting_cash: float) -> None:
-    nav = load_nav(db_path)
-    dates = list_decision_dates(db_path)
-
-    if not dates:
-        st.info("No decisions logged yet. Run `python -m portfolio.run_live <TICKER>` to populate.")
-        return
-
-    selected = st.selectbox("Pick a day", dates, index=0)
-
-    # Daily metrics: day number, portfolio return today, QQQ return today, NAV
-    nav_indexed = nav.set_index(nav["snapshot_date"].dt.strftime("%Y-%m-%d")) if not nav.empty else pd.DataFrame()
-    today_row = nav_indexed.loc[selected] if selected in nav_indexed.index else None
-
-    col1, col2, col3, col4 = st.columns(4)
-    if today_row is not None:
-        days_in = (date.fromisoformat(selected) - date(2026, 6, 1)).days + 1
-        col1.metric("Day", f"{max(1, days_in)} of 30")
-        col2.metric("Portfolio value", f"${float(today_row['portfolio_value']):,.0f}")
-
-        # Daily returns from previous trading day
-        prior = nav_indexed.iloc[nav_indexed.index.get_loc(selected) - 1] if nav_indexed.index.get_loc(selected) > 0 else None
-        if prior is not None:
-            port_ret = (today_row["portfolio_value"] - prior["portfolio_value"]) / prior["portfolio_value"] * 100
-            col3.metric("Portfolio return (today)", f"{port_ret:+.2f}%")
-            if today_row.get("qqq_close") and prior.get("qqq_close"):
-                qqq_ret = (today_row["qqq_close"] - prior["qqq_close"]) / prior["qqq_close"] * 100
-                col4.metric("QQQ return (today)", f"{qqq_ret:+.2f}%")
-    else:
-        col1.metric("Day", "—")
-        col2.info("No NAV snapshot for this date yet.")
-
-    st.divider()
-
-    # Per-ticker decisions for this day, each as a flowchart card.
-    decisions = load_decisions_for_date(db_path, selected)
-    if decisions.empty:
-        st.info(f"No decisions on {selected}.")
-        return
-
-    st.markdown(f"## {len(decisions)} decision(s) on {selected}")
-    for _, row in decisions.iterrows():
-        render_decision_card(row)
-        st.divider()
+    st.markdown("### Per-stage purpose")
+    st.markdown(
+        """
+| Stage | Agents | What they do |
+|---|---|---|
+| **1. Analyst Team** | 4 (parallel) | Gather data — technicals, sentiment, news, fundamentals |
+| **2. Researcher Debate** | 2 | Bull and Bear argue. A Research Manager synthesizes. |
+| **3. Trader** | 1 | Proposes a transaction with sizing + stop loss |
+| **4. Risk Management** | 3 | Risky / Neutral / Safe re-debate the proposal |
+| **5. Portfolio Manager** | 1 | Emits the final 5-tier rating (Buy / Overweight / Hold / Underweight / Sell) |
+| **Translator** | deterministic | Maps rating → $ amount. **The LLM cannot override our risk caps.** |
+| **Reflection** | 1 | After 5 trading days, looks at realized alpha vs QQQ and writes a post-mortem fed into future decisions |
+"""
+    )
 
 
 # ─── Tab 3: Memory & Learning ─────────────────────────────────────────────────
@@ -355,13 +481,6 @@ def _default_memory_path() -> str:
 
 
 def _parse_memory_log(path: str) -> list[dict]:
-    """Parse upstream's markdown memory log into per-entry dicts.
-
-    Each entry starts with a header like:
-      [2024-05-10 | NVDA | Overweight | +2.9% | +1.2% | 5d]
-    or, for unresolved entries:
-      [2024-05-10 | NVDA | Overweight | pending]
-    """
     if not os.path.exists(path):
         return []
     raw = open(path).read()
@@ -387,46 +506,41 @@ def _parse_memory_log(path: str) -> list[dict]:
     return out
 
 
-def render_memory(starting_cash: float) -> None:
+def render_memory() -> None:
     path = _default_memory_path()
-    st.caption(f"Source: {path}")
+    st.caption(f"Source: `{path}`")
 
     entries = _parse_memory_log(path)
     if not entries:
         st.info(
-            "Memory log is empty. It will populate automatically as the agent "
-            "makes decisions — each new run pulls in past lessons from prior "
-            "same-ticker decisions and writes a reflection once price data is "
-            "available."
+            "Memory log is empty. Each new decision adds an entry; reflections are added "
+            "automatically ~5 trading days later once price outcomes are available."
         )
         return
 
     resolved = [e for e in entries if e["status"] == "resolved"]
     pending = [e for e in entries if e["status"] == "pending"]
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total memories", len(entries))
-    col2.metric("Resolved (have outcome)", len(resolved))
-    col3.metric("Pending (awaiting price data)", len(pending))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total memories", len(entries))
+    c2.metric("Resolved", len(resolved))
+    c3.metric("Pending", len(pending))
 
     st.markdown(
-        "These are the lessons fed to the Portfolio Manager before each new "
-        "decision. Alpha is measured against **QQQ** (our benchmark)."
+        "Past lessons are fed to the Portfolio Manager before each new decision. "
+        "Alpha is measured against **QQQ**."
     )
 
-    # Resolved entries first (with reflection)
-    st.subheader("Resolved decisions — what the agent learned")
-    if not resolved:
-        st.info("No resolved entries yet. Returns become available ~5 trading days after a decision.")
-    for e in reversed(resolved):  # newest first
-        with st.expander(
-            f"{e['date']} · {e['ticker']} · {e['rating']} · "
-            f"alpha {e['alpha']} (raw {e['raw_return']}, held {e['holding']})"
-        ):
-            st.markdown(e["body"])
+    if resolved:
+        st.subheader("Resolved — what the agent learned")
+        for e in reversed(resolved):
+            with st.expander(
+                f"{e['date']} · {e['ticker']} · {e['rating']} · alpha {e['alpha']}"
+            ):
+                st.markdown(e["body"])
 
     if pending:
-        st.subheader("Pending decisions — waiting for outcome")
+        st.subheader("Pending — waiting for outcome")
         for e in reversed(pending):
             with st.expander(f"{e['date']} · {e['ticker']} · {e['rating']} (pending)"):
                 st.markdown(e["body"])
@@ -439,30 +553,28 @@ def main() -> None:
     db_path = os.environ.get("PORTFOLIO_DB_PATH", "./portfolio_state.db")
     starting_cash = float(os.environ.get("PORTFOLIO_STARTING_CASH", "100000"))
 
-    st.title("AI Portfolio Manager")
-    st.caption("Live paper-trading vs QQQ for June 2026 (SPY shown for context).")
+    label, sub = day_label()
+    st.markdown(f"<div class='day-banner'>{label}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='day-sub'>{sub}</div>", unsafe_allow_html=True)
 
-    with st.sidebar:
-        st.header("Config")
-        st.text(f"DB: {db_path}")
-        st.text(f"Start cash: ${starting_cash:,.0f}")
-        if st.button("Refresh data"):
-            st.cache_data.clear()
-            st.rerun()
+    tab_overview, tab_arch, tab_memory = st.tabs(["📈 Overview", "🧠 Architecture", "📚 Memory & Learning"])
 
     if not os.path.exists(db_path):
-        st.warning(f"No DB at {db_path} yet. Run `python -m portfolio.run_live <TICKER>` first.")
-        st.stop()
+        with tab_overview:
+            st.warning("No data yet — dashboard activates after the first scheduled run.")
+            render_overview(db_path, starting_cash)
+        with tab_arch:
+            render_architecture()
+        with tab_memory:
+            render_memory()
+        return
 
-    tab1, tab2, tab3 = st.tabs(
-        ["Overview", "Daily detail (for reels)", "Memory & Learning"]
-    )
-    with tab1:
+    with tab_overview:
         render_overview(db_path, starting_cash)
-    with tab2:
-        render_daily_detail(db_path, starting_cash)
-    with tab3:
-        render_memory(starting_cash)
+    with tab_arch:
+        render_architecture()
+    with tab_memory:
+        render_memory()
 
 
 if __name__ == "__main__":
