@@ -30,13 +30,17 @@ dependencies = [
     "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",
     "yfinance>=0.2.63",
+    "alpaca-py>=0.30.0",
+    "streamlit>=1.40,<1.50",
+    "apscheduler>=3.10.4",
+    "plotly>=5.24.0",
 ]
 
 [project.scripts]
 tradingagents = "cli.main:app"
 
 [tool.setuptools.packages.find]
-include = ["tradingagents*", "cli*"]
+include = ["tradingagents*", "cli*", "portfolio*"]
 
 [tool.setuptools.package-data]
 cli = ["static/*"]
