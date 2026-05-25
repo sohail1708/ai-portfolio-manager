@@ -127,7 +127,7 @@ def log_decision(
             reasoning,
             stop_loss,
             position_sizing,
-            json.dumps(raw_state) if raw_state is not None else None,
+            json.dumps(raw_state, default=str) if raw_state is not None else None,
         ),
     )
     conn.commit()

@@ -57,6 +57,14 @@ def run_one(ticker: str, trade_date: str, *, dry_run: bool = False) -> int:
     conn = store.connect(db_path)
     store.init_schema(conn)
 
+    # Persist every agent's intermediate output so the dashboard can render
+    # the per-day reasoning flow (analyst reports, debate, trader, risk, PM).
+    persisted_state = {
+        k: v
+        for k, v in final_state.items()
+        if k != "messages"  # raw LangChain messages bloat the JSON; not needed
+    }
+
     decision_id = store.log_decision(
         conn,
         ticker=ticker,
@@ -65,7 +73,7 @@ def run_one(ticker: str, trade_date: str, *, dry_run: bool = False) -> int:
         reasoning=decision.investment_thesis or decision.executive_summary,
         stop_loss=None,
         position_sizing=decision.time_horizon,
-        raw_state={"final_trade_decision": decision_text},
+        raw_state=persisted_state,
     )
     print(f"[run_live] logged decision id={decision_id}")
 
