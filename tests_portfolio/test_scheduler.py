@@ -9,8 +9,15 @@ from __future__ import annotations
 from portfolio.scheduler.runner import parse_universe
 
 
-def test_parse_universe_default():
+def test_parse_universe_empty_string():
     assert parse_universe("") == []
+
+
+def test_parse_universe_default_is_9_tech_names(monkeypatch):
+    monkeypatch.delenv("PORTFOLIO_UNIVERSE", raising=False)
+    u = parse_universe()
+    assert "AAPL" in u and "META" in u and "AVGO" in u
+    assert "QQQ" not in u, "QQQ must not be in tradeable universe; it's the benchmark"
 
 
 def test_parse_universe_basic():

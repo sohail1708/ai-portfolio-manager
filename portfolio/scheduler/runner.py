@@ -25,7 +25,11 @@ from portfolio.run_live import run_one
 from portfolio.state import store
 
 DEFAULT_CRON = "0 16 * * 1-5"
-DEFAULT_UNIVERSE = "AAPL,MSFT,NVDA,GOOGL,AMZN"
+DEFAULT_UNIVERSE = "AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,AVGO,ORCL"
+DEFAULT_CASH_PARK_TICKER = "QQQ"
+# Park idle cash in QQQ above this $-threshold so we don't underperform from
+# sitting in cash during a rally.
+CASH_PARK_THRESHOLD = 500.0
 _SETTLED_STATUSES = {"filled", "canceled", "cancelled", "rejected", "expired"}
 
 
@@ -104,7 +108,8 @@ def snapshot_eod(
             for p in positions
         ],
     )
-    spy_close = _spy_close_for(snapshot_date)
+    qqq_close = _index_close_for("QQQ", snapshot_date)
+    spy_close = _index_close_for("SPY", snapshot_date)
     store.log_nav(
         conn,
         snapshot_date=snapshot_date,
@@ -112,19 +117,71 @@ def snapshot_eod(
         cash=account.cash,
         equity=account.equity,
         spy_close=spy_close,
+        qqq_close=qqq_close,
     )
     print(
         f"[scheduler] EOD snapshot {snapshot_date}: "
-        f"nav=${account.portfolio_value:,.2f} spy_close={spy_close}"
+        f"nav=${account.portfolio_value:,.2f} qqq_close={qqq_close} spy_close={spy_close}"
     )
 
 
-def _spy_close_for(iso_date: str) -> float | None:
+def park_idle_cash(
+    alpaca: AlpacaClient,
+    conn: sqlite3.Connection,
+    *,
+    park_ticker: str | None = None,
+    threshold: float = CASH_PARK_THRESHOLD,
+) -> None:
+    """If cash > threshold, buy the park ticker (default QQQ) with the excess."""
+    park_ticker = park_ticker or os.environ.get(
+        "PORTFOLIO_CASH_PARK_TICKER", DEFAULT_CASH_PARK_TICKER
+    )
+    account = alpaca.get_account()
+    if account.cash < threshold:
+        print(
+            f"[scheduler] cash ${account.cash:,.2f} below threshold "
+            f"${threshold:,.0f}; no park needed."
+        )
+        return
+
+    notional = round(account.cash * 0.99, 2)  # leave a tiny float for fees
+    print(
+        f"[scheduler] parking ${notional:,.2f} of idle cash in {park_ticker}..."
+    )
+    trade_id = store.log_trade(
+        conn,
+        decision_id=None,
+        ticker=park_ticker,
+        side="buy",
+        qty=0,
+        order_type="market",
+    )
+    try:
+        order = alpaca.submit_market_order(park_ticker, "buy", notional=notional)
+    except Exception as e:
+        store.update_trade_status(
+            conn, trade_id=trade_id, status="rejected", error=str(e)
+        )
+        print(f"[scheduler] cash park failed: {e!r}")
+        return
+    store.update_trade_status(
+        conn,
+        trade_id=trade_id,
+        status=order.status,
+        filled_qty=order.filled_qty,
+        filled_avg_price=order.filled_avg_price,
+    )
+    print(f"[scheduler] park order {order.alpaca_order_id} status={order.status}")
+
+
+def _index_close_for(ticker: str, iso_date: str) -> float | None:
     import yfinance as yf
 
     start = date.fromisoformat(iso_date)
     end = start + timedelta(days=1)
-    hist = yf.Ticker("SPY").history(start=start.isoformat(), end=end.isoformat(), auto_adjust=False)
+    hist = yf.Ticker(ticker).history(
+        start=start.isoformat(), end=end.isoformat(), auto_adjust=False
+    )
     if hist.empty:
         return None
     return float(hist["Close"].iloc[0])
@@ -149,6 +206,8 @@ def daily_job(*, dry_run: bool = False) -> None:
 
     alpaca = AlpacaClient(paper=True)
     settle_pending_orders(alpaca, conn)
+    park_idle_cash(alpaca, conn)
+    settle_pending_orders(alpaca, conn)  # poll the park order too
     snapshot_eod(alpaca, conn, today)
 
 

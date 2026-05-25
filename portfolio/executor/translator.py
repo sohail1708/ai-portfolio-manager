@@ -28,9 +28,12 @@ class ParsedDecision:
 
 @dataclass
 class TranslatorConfig:
-    # Sizing per rating, as a fraction of NAV.
-    buy_pct_nav: float = 0.05         # full conviction
-    overweight_pct_nav: float = 0.025  # half-position incremental add
+    # Sizing per rating, as a fraction of NAV. With a 9-name universe these
+    # targets allow up to ~90% deployed across all names; the scheduler parks
+    # any remaining cash in QQQ so we don't underperform the benchmark from
+    # sitting in cash during rallies.
+    buy_pct_nav: float = 0.10         # full conviction
+    overweight_pct_nav: float = 0.05  # half-position incremental add
     max_position_pct_nav: float = 0.20
     min_trade_notional: float = 25.0
     # Underweight trims this fraction of the current position.

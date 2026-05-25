@@ -115,17 +115,17 @@ class TestTranslateBuy:
             time_horizon=None,
         )
 
-    def test_fresh_buy_targets_5pct_of_nav(self):
+    def test_fresh_buy_targets_10pct_of_nav(self):
         intent = translate(ticker="NVDA", decision=self._decision("Buy"), ctx=self._ctx())
         assert intent is not None
         assert intent.side == "buy"
-        assert intent.notional == 5_000.0
+        assert intent.notional == 10_000.0
         assert "buy" in intent.reason
 
-    def test_fresh_overweight_targets_2_5pct_of_nav(self):
+    def test_fresh_overweight_targets_5pct_of_nav(self):
         intent = translate(ticker="NVDA", decision=self._decision("Overweight"), ctx=self._ctx())
         assert intent is not None
-        assert intent.notional == 2_500.0
+        assert intent.notional == 5_000.0
         assert "overweight" in intent.reason
 
     def test_buy_caps_to_buying_power(self):
@@ -147,15 +147,15 @@ class TestTranslateBuy:
         assert intent is None
 
     def test_overweight_above_target_adds_toward_cap(self):
-        # Position at 7% (above 2.5% overweight target, below 20% cap) → top up to cap.
+        # Position at 12% (above 5% overweight target, below 20% cap) → top up to cap.
         existing = Position(
-            ticker="NVDA", qty=70, avg_entry_price=100, market_value=7_000, unrealized_pl=0
+            ticker="NVDA", qty=120, avg_entry_price=100, market_value=12_000, unrealized_pl=0
         )
         intent = translate(
             ticker="NVDA", decision=self._decision("Overweight"), ctx=self._ctx(position=existing)
         )
         assert intent is not None
-        assert intent.notional == 13_000.0  # cap (20k) - current (7k)
+        assert intent.notional == 8_000.0  # cap (20k) - current (12k)
 
     def test_buy_skipped_below_min_notional(self):
         cfg = TranslatorConfig(buy_pct_nav=0.05, min_trade_notional=25.0)
