@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AI Portfolio Manager — vs QQQ</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -12,90 +13,124 @@
     tailwind.config = {
       theme: {
         extend: {
-          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            bull: { 50: '#ecfdf5', 100: '#d1fae5', 500: '#10b981', 600: '#059669', 700: '#047857' },
+            bear: { 50: '#fef2f2', 100: '#fee2e2', 500: '#ef4444', 600: '#dc2626', 700: '#b91c1c' },
+            neutral: { 50: '#fffbeb', 100: '#fef3c7', 500: '#f59e0b', 600: '#d97706', 700: '#b45309' },
+          }
         }
       }
     }
   </script>
   <style>
-    body { font-family: 'Inter', system-ui, sans-serif; }
-    .card { background: #fff; border: 1px solid #e4e4e7; border-radius: 16px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
-    .rating-chip { display: inline-flex; align-items: center; padding: 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; border-radius: 999px; }
-    .r-buy         { background: #d1fae5; color: #065f46; }
-    .r-overweight  { background: #ecfccb; color: #3f6212; }
-    .r-hold        { background: #fef3c7; color: #92400e; }
-    .r-underweight { background: #fed7aa; color: #9a3412; }
-    .r-sell        { background: #fee2e2; color: #991b1b; }
-    .hero-num     { font-size: clamp(64px, 12vw, 128px); font-weight: 800; letter-spacing: -0.04em; line-height: 1; }
-    .agent-section { border-left: 3px solid #e4e4e7; padding-left: 16px; margin-bottom: 24px; }
-    .agent-section h4 { font-weight: 700; color: #18181b; margin-bottom: 6px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .agent-section p { color: #3f3f46; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+    body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    .num { font-family: 'JetBrains Mono', monospace; font-feature-settings: "tnum"; }
+    .card { background: #fff; border: 1px solid #e4e4e7; border-radius: 16px; }
+    .card-hover { transition: all 200ms ease; }
+    .card-hover:hover { border-color: #18181b; box-shadow: 0 8px 24px -8px rgba(0,0,0,0.12); }
+
+    .hero-win  { background: linear-gradient(135deg, #ecfdf5 0%, #ffffff 60%); border-color: #a7f3d0; }
+    .hero-lose { background: linear-gradient(135deg, #fef2f2 0%, #ffffff 60%); border-color: #fecaca; }
+    .hero-num  { font-family: 'JetBrains Mono', monospace; font-size: clamp(72px, 14vw, 144px); font-weight: 800; letter-spacing: -0.05em; line-height: 0.95; }
+
+    .rating-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 999px; }
+    .rating-chip::before { content: ""; width: 6px; height: 6px; border-radius: 999px; }
+    .r-buy         { background: #d1fae5; color: #065f46; } .r-buy::before         { background: #059669; }
+    .r-overweight  { background: #ecfccb; color: #3f6212; } .r-overweight::before  { background: #65a30d; }
+    .r-hold        { background: #fef3c7; color: #92400e; } .r-hold::before        { background: #d97706; }
+    .r-underweight { background: #fed7aa; color: #9a3412; } .r-underweight::before { background: #ea580c; }
+    .r-sell        { background: #fee2e2; color: #991b1b; } .r-sell::before        { background: #dc2626; }
+
+    .tone-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 999px; }
+    .tone-chip::before { content: ""; width: 5px; height: 5px; border-radius: 999px; }
+    .t-bull    { background: #ecfdf5; color: #047857; } .t-bull::before    { background: #10b981; }
+    .t-bear    { background: #fef2f2; color: #b91c1c; } .t-bear::before    { background: #ef4444; }
+    .t-neutral { background: #fffbeb; color: #b45309; } .t-neutral::before { background: #f59e0b; }
+
+    .metric-chip { display: inline-block; padding: 2px 8px; background: #f4f4f5; color: #52525b; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; }
+
+    .agent-card { border: 1px solid #e4e4e7; border-radius: 12px; transition: all 200ms ease; }
+    .agent-card:hover { border-color: #a1a1aa; }
+    .agent-full { font-size: 13px; line-height: 1.7; color: #3f3f46; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+
     [x-cloak] { display: none !important; }
+    .scrollbar-thin::-webkit-scrollbar { width: 8px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
   </style>
 </head>
 <body class="text-zinc-900" x-data="dashboardApp()">
 
 <div class="max-w-7xl mx-auto px-6 py-8">
 
-  <!-- Header strip -->
-  <div class="flex items-center justify-between mb-8">
+  <!-- Header -->
+  <div class="flex items-start justify-between mb-8">
     <div>
-      <div class="flex items-center gap-3">
-        <span class="text-xs font-semibold uppercase tracking-widest text-zinc-500">{{ day.phase }}</span>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-[11px] font-bold uppercase tracking-[0.2em] text-zinc-500">{{ day.phase }}</span>
         {% if day.is_live %}
-        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-50 text-red-700 text-xs font-semibold">
-          <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span> LIVE
+        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-bear-50 text-bear-700 text-[10px] font-bold uppercase tracking-widest">
+          <span class="w-1.5 h-1.5 rounded-full bg-bear-500 animate-pulse"></span> Live
         </span>
         {% endif %}
       </div>
-      <h1 class="text-3xl font-extrabold tracking-tight mt-1">AI Portfolio Manager</h1>
-      <p class="text-sm text-zinc-500 mt-1">vs NASDAQ-100 (QQQ) for June 2026</p>
+      <h1 class="text-3xl font-extrabold tracking-tight">AI Portfolio Manager</h1>
+      <p class="text-sm text-zinc-500 mt-1">Picking 9 NASDAQ tech stocks. Can it beat QQQ for June 2026?</p>
     </div>
     <div class="text-right">
-      <div class="text-xs uppercase tracking-widest text-zinc-500">{{ day.label }}</div>
+      <div class="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{{ day.label }}</div>
       <div class="text-sm text-zinc-600 mt-1">{{ day.sub }}</div>
     </div>
   </div>
 
   <!-- Hero -->
-  <div class="card p-10 mb-6 text-center">
+  <div class="card p-10 mb-6 text-center
+              {% if hero.winning %}hero-win{% elif hero.winning is false %}hero-lose{% endif %}">
     {% if hero.winning is none %}
-      <div class="text-zinc-400 hero-num">—</div>
-      <div class="mt-2 text-lg font-semibold text-zinc-500">Waiting for first run</div>
+      <div class="hero-num text-zinc-300">—</div>
+      <div class="mt-2 text-sm font-semibold text-zinc-500 uppercase tracking-widest">Waiting for first run</div>
     {% elif hero.winning %}
-      <div class="hero-num text-emerald-600">+{{ "%.2f"|format(hero.alpha_pct) }}%</div>
-      <div class="mt-2 text-2xl font-bold text-emerald-700">AI is BEATING QQQ</div>
+      <div class="hero-num text-bull-600">+{{ "%.2f"|format(hero.alpha_pct) }}%</div>
+      <div class="mt-2 text-sm font-bold uppercase tracking-[0.25em] text-bull-700">AI is beating QQQ</div>
     {% else %}
-      <div class="hero-num text-red-600">{{ "%.2f"|format(hero.alpha_pct) }}%</div>
-      <div class="mt-2 text-2xl font-bold text-red-700">AI is LOSING to QQQ</div>
+      <div class="hero-num text-bear-600">{{ "%.2f"|format(hero.alpha_pct) }}%</div>
+      <div class="mt-2 text-sm font-bold uppercase tracking-[0.25em] text-bear-700">AI is losing to QQQ</div>
     {% endif %}
-    <div class="mt-4 flex justify-center gap-10 text-sm">
+    <div class="mt-8 flex justify-center gap-12 text-sm">
       <div>
-        <div class="text-zinc-500 uppercase text-xs tracking-widest">Portfolio</div>
-        <div class="text-xl font-bold mt-1">${{ "{:,.0f}".format(hero.portfolio_value) }}</div>
+        <div class="text-[10px] text-zinc-500 uppercase tracking-[0.2em]">Portfolio</div>
+        <div class="text-2xl font-bold mt-1 num">${{ "{:,.0f}".format(hero.portfolio_value) }}</div>
       </div>
+      <div class="border-l border-zinc-200"></div>
       <div>
-        <div class="text-zinc-500 uppercase text-xs tracking-widest">QQQ-Equivalent</div>
-        <div class="text-xl font-bold mt-1">${{ "{:,.0f}".format(hero.qqq_eq) }}</div>
+        <div class="text-[10px] text-zinc-500 uppercase tracking-[0.2em]">QQQ-Equivalent</div>
+        <div class="text-2xl font-bold mt-1 num">${{ "{:,.0f}".format(hero.qqq_eq) }}</div>
       </div>
+      <div class="border-l border-zinc-200"></div>
       <div>
-        <div class="text-zinc-500 uppercase text-xs tracking-widest">Alpha $</div>
-        <div class="text-xl font-bold mt-1 {% if hero.alpha_usd > 0 %}text-emerald-600{% elif hero.alpha_usd < 0 %}text-red-600{% endif %}">
+        <div class="text-[10px] text-zinc-500 uppercase tracking-[0.2em]">Alpha $</div>
+        <div class="text-2xl font-bold mt-1 num
+                    {% if hero.alpha_usd > 0 %}text-bull-600{% elif hero.alpha_usd < 0 %}text-bear-600{% endif %}">
           {% if hero.alpha_usd > 0 %}+{% endif %}${{ "{:,.0f}".format(hero.alpha_usd) }}
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Bento grid: NAV chart + Streak + Today's P&L -->
+  <!-- Row 1: NAV chart + Streak -->
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-
-    <!-- NAV chart (2 cols) -->
     <div class="card p-6 lg:col-span-2">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-sm font-bold uppercase tracking-widest text-zinc-500">NAV vs QQQ</h3>
-        <div class="flex items-center gap-4 text-xs text-zinc-500">
-          <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-blue-600"></span> Portfolio</span>
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">NAV vs QQQ</h3>
+          <p class="text-sm font-semibold text-zinc-900 mt-0.5">Performance since launch</p>
+        </div>
+        <div class="flex items-center gap-5 text-[11px] text-zinc-600">
+          <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-blue-600 rounded"></span> Portfolio</span>
           <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-zinc-400 border-dashed border-t border-zinc-400"></span> QQQ</span>
         </div>
       </div>
@@ -104,95 +139,100 @@
       </div>
     </div>
 
-    <!-- Win streak -->
     <div class="card p-6">
-      <h3 class="text-sm font-bold uppercase tracking-widest text-zinc-500">Streak</h3>
-      <div class="mt-3">
-        <div class="text-5xl font-extrabold tracking-tight">
-          {{ streak.days_won }}<span class="text-zinc-300">/{{ streak.days_total }}</span>
-        </div>
-        <div class="text-sm text-zinc-500 mt-1">days beating QQQ</div>
+      <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Streak</h3>
+      <p class="text-sm font-semibold text-zinc-900 mt-0.5 mb-4">Days beating QQQ</p>
+      <div class="num text-6xl font-extrabold tracking-tight">
+        {{ streak.days_won }}<span class="text-zinc-300">/{{ streak.days_total }}</span>
       </div>
-      <div class="mt-6 space-y-2 text-sm">
+      <div class="mt-6 pt-6 border-t border-zinc-100 space-y-3 text-sm">
         {% if streak.best %}
-        <div class="flex justify-between">
+        <div class="flex justify-between items-center">
           <span class="text-zinc-500">Best day</span>
-          <span class="font-semibold text-emerald-600">+{{ "%.2f"|format(streak.best.alpha * 100) }}%</span>
+          <span class="font-bold text-bull-600 num">+{{ "%.2f"|format(streak.best.alpha * 100) }}%</span>
         </div>
         {% endif %}
         {% if streak.worst %}
-        <div class="flex justify-between">
+        <div class="flex justify-between items-center">
           <span class="text-zinc-500">Worst day</span>
-          <span class="font-semibold text-red-600">{{ "%.2f"|format(streak.worst.alpha * 100) }}%</span>
+          <span class="font-bold text-bear-600 num">{{ "%.2f"|format(streak.worst.alpha * 100) }}%</span>
         </div>
         {% endif %}
-        {% if not streak.best and not streak.worst %}
-        <div class="text-zinc-400 italic text-sm">Daily wins/losses appear after first 2 trading days</div>
+        {% if not streak.best %}
+        <div class="text-zinc-400 italic text-xs">Daily alpha appears after first 2 trading days</div>
         {% endif %}
       </div>
     </div>
   </div>
 
-  <!-- Allocation + Decisions -->
+  <!-- Row 2: Allocation + Decisions -->
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-
-    <!-- Allocation -->
     <div class="card p-6">
-      <h3 class="text-sm font-bold uppercase tracking-widest text-zinc-500 mb-4">Allocation</h3>
+      <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Allocation</h3>
+      <p class="text-sm font-semibold text-zinc-900 mt-0.5 mb-4">Current positions</p>
       {% if positions %}
-      <div class="h-64">
+      <div class="h-56 relative">
         <canvas id="allocChart"></canvas>
       </div>
-      <div class="mt-4 space-y-1.5 text-sm">
+      <div class="mt-5 space-y-2">
         {% for p in positions %}
-        <div class="flex justify-between">
-          <span class="font-semibold">{{ p.ticker }}</span>
-          <span class="text-zinc-500">${{ "{:,.0f}".format(p.market_value or 0) }}</span>
+        <div class="flex justify-between items-center text-sm">
+          <span class="font-bold">{{ p.ticker }}</span>
+          <span class="text-zinc-500 num text-xs">${{ "{:,.0f}".format(p.market_value or 0) }}</span>
         </div>
         {% endfor %}
       </div>
       {% else %}
-      <div class="h-64 flex items-center justify-center text-zinc-400 italic text-sm">
+      <div class="h-56 flex items-center justify-center text-zinc-400 italic text-sm">
         No positions yet
       </div>
       {% endif %}
     </div>
 
-    <!-- Today's decisions (9 cards in a grid) — 2 cols -->
     <div class="card p-6 lg:col-span-2">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="text-sm font-bold uppercase tracking-widest text-zinc-500">Today's Decisions</h3>
-        <span class="text-xs text-zinc-400">click any ticker for full reasoning</span>
+        <div>
+          <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Latest decisions</h3>
+          <p class="text-sm font-semibold text-zinc-900 mt-0.5">
+            {% if decisions %}{{ decisions|length }} ratings on {{ decisions[0].trade_date }}{% else %}Awaiting first run{% endif %}
+          </p>
+        </div>
+        <span class="text-[11px] text-zinc-400">tap any ticker →</span>
       </div>
       {% if decisions %}
       <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
         {% for d in decisions %}
         <button
           @click="openDecision({{ d.id }})"
-          class="text-left p-4 rounded-xl border border-zinc-200 hover:border-zinc-400 hover:shadow-md transition group bg-zinc-50/50">
-          <div class="flex items-start justify-between">
-            <div class="font-bold text-lg">{{ d.ticker }}</div>
+          class="text-left p-4 card-hover agent-card bg-white">
+          <div class="flex items-start justify-between mb-2">
+            <div>
+              <div class="font-extrabold text-lg tracking-tight">{{ d.ticker }}</div>
+              <div class="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">tap for details</div>
+            </div>
             <span class="rating-chip r-{{ d.action|lower }}">{{ d.action|title }}</span>
           </div>
-          <div class="mt-2 text-xs text-zinc-500 line-clamp-3">
-            {{ (d.reasoning or "")[:140] }}{% if d.reasoning and d.reasoning|length > 140 %}…{% endif %}
-          </div>
-          <div class="mt-3 text-xs text-zinc-400 group-hover:text-zinc-600">View reasoning →</div>
+          {% if d.pm and d.pm.price_target %}
+          <div class="text-xs text-zinc-500 mt-3">Price target: <span class="num font-semibold text-zinc-900">${{ d.pm.price_target }}</span></div>
+          {% endif %}
+          {% if d.pm and d.pm.horizon %}
+          <div class="text-xs text-zinc-500">Horizon: <span class="font-medium text-zinc-700">{{ d.pm.horizon }}</span></div>
+          {% endif %}
         </button>
         {% endfor %}
       </div>
       {% else %}
       <div class="text-zinc-400 italic text-sm py-12 text-center">
-        No decisions yet — first run is June 1 at 21:00 BST.
+        First run is June 1 at 21:00 BST.
       </div>
       {% endif %}
     </div>
   </div>
 
   <footer class="mt-12 text-center text-xs text-zinc-400">
-    Forked from <a class="underline" href="https://github.com/TauricResearch/TradingAgents">TauricResearch/TradingAgents</a> v0.2.4 ·
-    <a class="underline" href="https://arxiv.org/abs/2412.20138">paper</a> ·
-    <a class="underline" href="https://github.com/sohail1708/ai-portfolio-manager">this fork</a>
+    Forked from <a class="hover:text-zinc-700 underline" href="https://github.com/TauricResearch/TradingAgents">TradingAgents</a> v0.2.4 ·
+    <a class="hover:text-zinc-700 underline" href="https://arxiv.org/abs/2412.20138">paper</a> ·
+    <a class="hover:text-zinc-700 underline" href="https://github.com/sohail1708/ai-portfolio-manager">repo</a>
   </footer>
 </div>
 
@@ -200,31 +240,89 @@
 <div
   x-show="modalOpen"
   x-cloak
-  x-transition.opacity
+  x-transition.opacity.duration.150ms
   @keydown.escape.window="modalOpen = false"
-  class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+  class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
   @click.self="modalOpen = false">
 
-  <div class="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
-       x-show="modalOpen" x-transition>
-    <div class="sticky top-0 bg-white border-b border-zinc-200 px-8 py-5 flex items-center justify-between">
-      <div>
-        <div class="flex items-center gap-3">
-          <span class="text-2xl font-bold" x-text="selected?.ticker"></span>
-          <span class="rating-chip" :class="'r-' + (selected?.action || 'hold').toLowerCase()" x-text="(selected?.action || '').toLowerCase()"></span>
-        </div>
-        <div class="text-xs text-zinc-500 mt-1" x-text="'Trade date: ' + (selected?.trade_date || '')"></div>
+  <div class="bg-white rounded-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl scrollbar-thin"
+       x-show="modalOpen"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0 scale-95"
+       x-transition:enter-end="opacity-100 scale-100">
+
+    <!-- Modal header -->
+    <div class="sticky top-0 bg-white border-b border-zinc-200 px-8 py-5 flex items-center justify-between z-10">
+      <div class="flex items-center gap-4">
+        <span class="text-3xl font-extrabold tracking-tight" x-text="selected?.ticker"></span>
+        <span class="rating-chip"
+              :class="'r-' + (selected?.action || 'hold').toLowerCase()"
+              x-text="(selected?.action || '').toLowerCase()"></span>
+        <span class="text-xs text-zinc-500" x-text="selected?.trade_date"></span>
       </div>
-      <button @click="modalOpen = false" class="text-zinc-400 hover:text-zinc-700 text-2xl leading-none">&times;</button>
+      <button @click="modalOpen = false" class="text-zinc-400 hover:text-zinc-900 text-3xl leading-none">&times;</button>
     </div>
 
-    <div class="px-8 py-6" x-show="selected">
-      <template x-for="section in sections" :key="section.key">
-        <div class="agent-section" x-show="selected?.state && selected.state[section.key]">
-          <h4 x-text="section.label"></h4>
-          <p x-text="(selected?.state || {})[section.key]"></p>
+    <!-- PM verdict hero (top of modal) -->
+    <div class="px-8 py-6 bg-gradient-to-br from-zinc-50 to-white border-b border-zinc-200" x-show="selected?.pm">
+      <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 mb-2">Portfolio Manager — final verdict</div>
+      <p class="text-base leading-relaxed text-zinc-800 mb-4" x-text="selected?.pm?.summary"></p>
+
+      <div class="grid grid-cols-3 gap-4 text-sm">
+        <div>
+          <div class="text-[10px] uppercase tracking-widest text-zinc-500">Rating</div>
+          <div class="font-bold mt-1" x-text="selected?.pm?.rating || '—'"></div>
         </div>
-      </template>
+        <div>
+          <div class="text-[10px] uppercase tracking-widest text-zinc-500">Price Target</div>
+          <div class="font-bold mt-1 num">
+            <template x-if="selected?.pm?.price_target">
+              <span x-text="'$' + selected.pm.price_target"></span>
+            </template>
+            <template x-if="!selected?.pm?.price_target"><span>—</span></template>
+          </div>
+        </div>
+        <div>
+          <div class="text-[10px] uppercase tracking-widest text-zinc-500">Horizon</div>
+          <div class="font-medium mt-1 text-sm" x-text="selected?.pm?.horizon || '—'"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent reasoning trail -->
+    <div class="px-8 py-6">
+      <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 mb-4">How the agents got there</div>
+
+      <div class="space-y-3">
+        <template x-for="agent in (selected?.agents || [])" :key="agent.key">
+          <div class="agent-card p-4" x-data="{ expanded: false }">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1.5">
+                  <span class="text-base" x-text="agent.emoji"></span>
+                  <span class="font-bold text-sm" x-text="agent.label"></span>
+                  <template x-if="agent.signal && agent.signal.label">
+                    <span class="tone-chip" :class="'t-' + agent.signal.tone" x-text="agent.signal.label"></span>
+                  </template>
+                </div>
+                <p class="text-sm text-zinc-700 leading-relaxed" x-text="agent.summary"></p>
+                <div class="mt-2 flex flex-wrap gap-1.5" x-show="agent.metrics.length">
+                  <template x-for="m in agent.metrics">
+                    <span class="metric-chip" x-text="m"></span>
+                  </template>
+                </div>
+              </div>
+              <button
+                @click="expanded = !expanded"
+                class="text-[11px] font-semibold text-zinc-500 hover:text-zinc-900 whitespace-nowrap uppercase tracking-wider">
+                <span x-show="!expanded">Read full ▼</span>
+                <span x-show="expanded">Collapse ▲</span>
+              </button>
+            </div>
+            <div x-show="expanded" x-transition class="agent-full mt-4 pt-4 border-t border-zinc-100" x-text="agent.full"></div>
+          </div>
+        </template>
+      </div>
     </div>
   </div>
 </div>
@@ -238,23 +336,19 @@
     return {
       modalOpen: false,
       selected: null,
-      sections: [
-        { key: 'market_report',          label: '📈  Market Analyst — technicals' },
-        { key: 'sentiment_report',       label: '💬  Sentiment Analyst — social' },
-        { key: 'news_report',            label: '📰  News Analyst — headlines' },
-        { key: 'fundamentals_report',    label: '📊  Fundamentals Analyst — financials' },
-        { key: 'investment_plan',        label: '⚖️  Research Manager — bull/bear synthesis' },
-        { key: 'trader_investment_plan', label: '🎯  Trader — concrete proposal' },
-        { key: 'final_trade_decision',   label: '✅  Portfolio Manager — final verdict' },
-      ],
       openDecision(id) {
         this.selected = decisions.find(d => d.id === id);
         this.modalOpen = true;
+        document.body.style.overflow = 'hidden';
+      },
+      init() {
+        this.$watch('modalOpen', open => {
+          document.body.style.overflow = open ? 'hidden' : '';
+        });
       },
     };
   }
 
-  // Charts
   document.addEventListener('DOMContentLoaded', () => {
     const navCanvas = document.getElementById('navChart');
     if (navCanvas && navSeries.length) {
@@ -267,27 +361,32 @@
               label: 'Portfolio',
               data: navSeries.map(r => r.portfolio),
               borderColor: '#2563eb',
-              backgroundColor: '#2563eb20',
-              tension: 0.25,
-              borderWidth: 3,
+              backgroundColor: 'rgba(37,99,235,0.08)',
+              fill: true,
+              tension: 0.3,
+              borderWidth: 2.5,
+              pointRadius: 3,
+              pointHoverRadius: 5,
+              pointBackgroundColor: '#2563eb',
             },
             {
               label: 'QQQ-equivalent',
               data: navSeries.map(r => r.qqq_eq),
               borderColor: '#a1a1aa',
               borderDash: [6, 4],
-              tension: 0.25,
-              borderWidth: 2,
+              tension: 0.3,
+              borderWidth: 1.5,
+              pointRadius: 0,
             },
           ],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+          plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
           scales: {
             y: { beginAtZero: false, grid: { color: '#f4f4f5' }, ticks: { callback: v => '$' + v.toLocaleString() } },
-            x: { grid: { display: false } },
+            x: { grid: { display: false }, ticks: { maxRotation: 0 } },
           },
         },
       });
@@ -302,13 +401,14 @@
           labels: withValue.map(p => p.ticker),
           datasets: [{
             data: withValue.map(p => p.market_value),
-            backgroundColor: ['#2563eb', '#7c3aed', '#db2777', '#dc2626', '#ea580c', '#ca8a04', '#16a34a', '#0891b2', '#475569'],
-            borderWidth: 0,
+            backgroundColor: ['#2563eb', '#7c3aed', '#0891b2', '#16a34a', '#ca8a04', '#dc2626', '#ea580c', '#db2777', '#475569'],
+            borderWidth: 2,
+            borderColor: '#fff',
           }],
         },
         options: {
           plugins: { legend: { display: false } },
-          cutout: '60%',
+          cutout: '70%',
         },
       });
     }

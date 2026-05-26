@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -142,6 +143,141 @@ def _latest_decisions(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+_SIGNAL_PATTERNS = [
+    (re.compile(r"FINAL TRANSACTION PROPOSAL.*?(BUY|SELL|HOLD)", re.I | re.S), 0),
+    (re.compile(r"\*?\*?(Rating|Recommendation|Action)\*?\*?\s*[:：]\s*\*?\*?\s*(Buy|Overweight|Hold|Underweight|Sell)", re.I), 1),
+]
+
+_SIGNAL_TO_TONE = {
+    "buy": ("Bullish", "bull"),
+    "overweight": ("Bullish", "bull"),
+    "hold": ("Neutral", "neutral"),
+    "underweight": ("Bearish", "bear"),
+    "sell": ("Bearish", "bear"),
+    "bullish": ("Bullish", "bull"),
+    "bearish": ("Bearish", "bear"),
+}
+
+_METRIC_PATTERNS = [
+    # Order matters — most specific first.
+    re.compile(r"RSI[:\s]+(\d+\.?\d*)", re.I),
+    re.compile(r"P\/E[:\s\(TTM\)]*[:\s]+(\d+\.?\d*)", re.I),
+    re.compile(r"forward\s*P\/E[:\s]+(\d+\.?\d*)", re.I),
+    re.compile(r"FCF[:\s\(TTM\)]*[:\s]+\$?(\d+\.?\d*[KMB]?)", re.I),
+    re.compile(r"Free\s*Cash\s*Flow[:\s]+\$?(\d+\.?\d*[KMB]?)", re.I),
+    re.compile(r"price\s*target[:\s]+\$?(\d+\.?\d*)", re.I),
+]
+
+
+def _summarize_agent(text: str | None, max_chars: int = 180) -> str:
+    """Pick the first informative sentence as a punchline."""
+    if not text:
+        return ""
+    cleaned = text.strip()
+    # Drop "FINAL TRANSACTION PROPOSAL: BUY/SELL/HOLD" preamble if it leads.
+    cleaned = re.sub(r"^FINAL TRANSACTION PROPOSAL.*?\n+", "", cleaned, flags=re.I | re.S)
+    # Drop markdown title lines.
+    lines = [l for l in cleaned.split("\n") if l.strip() and not l.strip().startswith("#")]
+    if not lines:
+        return ""
+    first = lines[0].strip()
+    # Drop bold/italic markers around the line.
+    first = re.sub(r"\*\*?(.+?)\*\*?", r"\1", first)
+    # Take the first sentence if it's long.
+    parts = re.split(r"(?<=[.!?])\s+", first, maxsplit=1)
+    out = parts[0] if parts else first
+    if len(out) > max_chars:
+        out = out[: max_chars - 1].rstrip() + "…"
+    return out
+
+
+def _signal_from_text(text: str | None) -> dict:
+    """Return {label: 'Bullish'|'Neutral'|'Bearish', tone: css_class} or empty dict."""
+    if not text:
+        return {}
+    for pat, grp in _SIGNAL_PATTERNS:
+        m = pat.search(text)
+        if m:
+            verdict = m.group(grp + 1).lower() if grp == 1 else m.group(1).lower()
+            if verdict in _SIGNAL_TO_TONE:
+                label, tone = _SIGNAL_TO_TONE[verdict]
+                return {"label": label, "tone": tone, "raw": verdict.title()}
+    # Fallback: scan for first 5-tier rating word that appears.
+    for word in ("Buy", "Overweight", "Hold", "Underweight", "Sell"):
+        if re.search(rf"\b{word}\b", text):
+            label, tone = _SIGNAL_TO_TONE[word.lower()]
+            return {"label": label, "tone": tone, "raw": word}
+    return {}
+
+
+def _extract_metrics(text: str | None) -> list[str]:
+    """Pull out numeric chips like 'RSI 78.63' / 'P/E 37' from agent text."""
+    if not text:
+        return []
+    out: list[str] = []
+    rsi = re.search(r"RSI[:\s]+(\d+\.?\d*)", text, re.I)
+    if rsi:
+        out.append(f"RSI {rsi.group(1)}")
+    pe = re.search(r"\bP/E(?:\s*\(TTM\))?[:\s]+(\d+\.?\d*)", text, re.I)
+    if pe:
+        out.append(f"P/E {pe.group(1)}")
+    fcf = re.search(r"FCF.{0,20}?\$?(\d+\.?\d*\s*[KMB]?)", text, re.I)
+    if fcf:
+        val = fcf.group(1).strip()
+        out.append(f"FCF ${val}")
+    pt = re.search(r"price\s*target.{0,20}?\$?(\d+\.?\d*)", text, re.I)
+    if pt:
+        out.append(f"PT ${pt.group(1)}")
+    close = re.search(r"closed\s*at\s*\*?\*?(\d+\.?\d*)", text, re.I)
+    if close:
+        out.append(f"Last ${close.group(1)}")
+    return out[:4]  # cap at 4 chips
+
+
+def _build_agent_views(state: dict) -> list[dict]:
+    """Per-agent: punchline + signal chip + key metric chips + full text."""
+    agents = [
+        ("market_report", "Market Analyst", "📈"),
+        ("sentiment_report", "Sentiment Analyst", "💬"),
+        ("news_report", "News Analyst", "📰"),
+        ("fundamentals_report", "Fundamentals Analyst", "📊"),
+        ("investment_plan", "Research Manager", "⚖️"),
+        ("trader_investment_plan", "Trader", "🎯"),
+    ]
+    views = []
+    for key, label, emoji in agents:
+        text = state.get(key) or ""
+        if not text:
+            continue
+        views.append({
+            "key": key,
+            "label": label,
+            "emoji": emoji,
+            "summary": _summarize_agent(text),
+            "signal": _signal_from_text(text),
+            "metrics": _extract_metrics(text),
+            "full": text,
+        })
+    return views
+
+
+def _pm_summary(state: dict) -> dict:
+    """Extract PM final verdict's key elements: rating, summary, price target, time horizon, stop."""
+    text = state.get("final_trade_decision") or ""
+    if not text:
+        return {}
+    rating_match = re.search(r"\*?\*?Rating\*?\*?\s*[:：]\s*\*?\*?\s*(Buy|Overweight|Hold|Underweight|Sell)", text, re.I)
+    summary_match = re.search(r"\*?\*?Executive Summary\*?\*?\s*[:：]\s*(.+?)(?=\n\s*\*\*|\Z)", text, re.S | re.I)
+    pt_match = re.search(r"\*?\*?Price Target\*?\*?\s*[:：]\s*\$?(\d+\.?\d*)", text, re.I)
+    horizon_match = re.search(r"\*?\*?Time Horizon\*?\*?\s*[:：]\s*([^\n]+)", text, re.I)
+    return {
+        "rating": rating_match.group(1).title() if rating_match else None,
+        "summary": (summary_match.group(1).strip() if summary_match else "")[:400],
+        "price_target": pt_match.group(1) if pt_match else None,
+        "horizon": horizon_match.group(1).strip() if horizon_match else None,
+    }
+
+
 def _decision_full(conn: sqlite3.Connection, decision_id: int) -> dict | None:
     row = conn.execute(
         "SELECT id, ticker, trade_date, action, reasoning, raw_state "
@@ -152,9 +288,12 @@ def _decision_full(conn: sqlite3.Connection, decision_id: int) -> dict | None:
         return None
     out = dict(row)
     try:
-        out["state"] = json.loads(out.pop("raw_state") or "{}")
+        state = json.loads(out.pop("raw_state") or "{}")
     except Exception:
-        out["state"] = {}
+        state = {}
+    out["state"] = state
+    out["agents"] = _build_agent_views(state)
+    out["pm"] = _pm_summary(state)
     return out
 
 
