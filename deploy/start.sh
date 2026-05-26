@@ -16,9 +16,9 @@ mkdir -p /data/memory /data/cache /data/logs
 echo "[start] launching scheduler daemon..."
 python -m portfolio.scheduler.runner > /data/logs/scheduler.log 2>&1 &
 
-echo "[start] launching Streamlit dashboard on :8080..."
-exec streamlit run portfolio/dashboard/app.py \
-    --server.port=8080 \
-    --server.address=0.0.0.0 \
-    --server.headless=true \
-    --browser.gatherUsageStats=false
+echo "[start] launching FastAPI dashboard on :8080..."
+exec uvicorn portfolio.dashboard.server:app \
+    --host 0.0.0.0 \
+    --port 8080 \
+    --workers 1 \
+    --log-level info
