@@ -504,18 +504,18 @@
               </button>
             </div>
 
-            <!-- Verdict (the call) -->
+            <!-- Headline (the call, bold) -->
             <div class="take-label">✅ Verdict</div>
-            <p class="text-sm text-zinc-900 font-semibold leading-relaxed" x-text="agent.verdict || '(no explicit verdict)'"></p>
+            <p class="text-[15px] text-zinc-900 font-bold leading-snug" x-text="agent.headline || '(no explicit verdict)'"></p>
 
-            <!-- Reasoning (the why) — visible by default, distinct from verdict -->
-            <div class="take-label mt-3">💭 Reasoning</div>
-            <p class="text-[13px] text-zinc-700 leading-relaxed" x-text="agent.reasoning || agent.full?.slice(0, 200)"></p>
+            <!-- Reason (the why) -->
+            <div class="take-label mt-3">💭 Why</div>
+            <p class="text-[13px] text-zinc-700 leading-relaxed" x-text="agent.reason || agent.full?.slice(0, 200)"></p>
 
-            <!-- Metric chips -->
-            <div class="mt-3 flex flex-wrap gap-1.5" x-show="agent.metrics.length">
-              <template x-for="m in agent.metrics">
-                <span class="metric-chip" x-text="m"></span>
+            <!-- Key points (LLM-extracted evidence) -->
+            <div class="mt-3 flex flex-wrap gap-1.5" x-show="agent.key_points && agent.key_points.length">
+              <template x-for="p in (agent.key_points || [])">
+                <span class="metric-chip" x-text="p"></span>
               </template>
             </div>
 

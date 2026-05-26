@@ -9,12 +9,16 @@ Production:
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import logging
 import os
 import re
 import sqlite3
 from datetime import date, datetime, timedelta
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -325,30 +329,159 @@ def _extract_metrics(text: str | None) -> list[str]:
     return out[:4]  # cap at 4 chips
 
 
-def _build_agent_views(state: dict) -> list[dict]:
-    """Per-agent: punchline + signal chip + key metric chips + full text."""
-    agents = [
-        ("market_report", "Market Analyst", "📈"),
-        ("sentiment_report", "Sentiment Analyst", "💬"),
-        ("news_report", "News Analyst", "📰"),
-        ("fundamentals_report", "Fundamentals Analyst", "📊"),
-        ("investment_plan", "Research Manager", "⚖️"),
-        ("trader_investment_plan", "Trader", "🎯"),
-    ]
+_AGENT_DEFS = [
+    ("market_report", "Market Analyst", "📈", "an equity technical analyst"),
+    ("sentiment_report", "Sentiment Analyst", "💬", "an equity sentiment analyst"),
+    ("news_report", "News Analyst", "📰", "an equity news/macro analyst"),
+    ("fundamentals_report", "Fundamentals Analyst", "📊", "an equity fundamentals analyst"),
+    ("investment_plan", "Research Manager", "⚖️", "a research manager synthesizing bull/bear debate"),
+    ("trader_investment_plan", "Trader", "🎯", "a sell-side trader writing a transaction proposal"),
+]
+
+
+_SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "stance": {"type": "string", "enum": ["Bullish", "Bearish", "Neutral"]},
+        "headline": {
+            "type": "string",
+            "description": "ONE sentence stating the agent's actual call/conclusion. Max 20 words. No hedging language like 'overall'.",
+        },
+        "reason": {
+            "type": "string",
+            "description": "ONE sentence explaining WHY they made that call. Max 25 words. Cite specific data the agent referenced.",
+        },
+        "key_points": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "2 to 3 short bullets (3-7 words each) of specific evidence: prices, ratios, catalysts, levels.",
+        },
+    },
+    "required": ["stance", "headline", "reason", "key_points"],
+    "additionalProperties": False,
+}
+
+
+_openai_client = None
+_summarizer_model = os.environ.get("DASHBOARD_SUMMARIZER_MODEL", "gpt-5.4-mini")
+
+
+def _get_openai():
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+        _openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    return _openai_client
+
+
+def _summarize_with_llm(text: str, agent_role: str) -> dict | None:
+    """Call LLM to produce a structured summary of a verbose agent report."""
+    if not text or not os.environ.get("OPENAI_API_KEY"):
+        return None
+    try:
+        client = _get_openai()
+        prompt = (
+            f"You are summarizing {agent_role}'s analysis of a stock for a one-glance dashboard card.\n\n"
+            "Pull out:\n"
+            "- stance: Bullish / Bearish / Neutral — the overall directional view\n"
+            "- headline: ONE crisp sentence (≤20 words) stating their actual call/conclusion. Pull from 'Bottom line' / 'Recommendation' / 'Final view' if present. No throat-clearing.\n"
+            "- reason: ONE crisp sentence (≤25 words) explaining WHY. Cite specific numbers/data the agent referenced.\n"
+            "- key_points: 2–3 short evidence bullets (3–7 words each). E.g., 'RSI 78 — overbought', 'BofA target $380', 'P/E 37 expensive'.\n\n"
+            "Be specific, not generic. Don't paraphrase the agent's hedging — surface the conclusion.\n\n"
+            f"Agent's full report:\n{text[:5000]}"
+        )
+        resp = client.chat.completions.create(
+            model=_summarizer_model,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "agent_summary", "strict": True, "schema": _SUMMARY_SCHEMA},
+            },
+        )
+        return json.loads(resp.choices[0].message.content)
+    except Exception as e:
+        logger.warning("LLM summarization failed for %s: %s", agent_role, e)
+        return None
+
+
+def _summarize_decision_state(state: dict) -> dict:
+    """Generate LLM summaries for all agent reports in a state dict (parallel)."""
+    summaries: dict = {}
+    tasks: list[tuple[str, str, str]] = []
+    for key, label, _emoji, role in _AGENT_DEFS:
+        text = state.get(key) or ""
+        if text.strip():
+            tasks.append((key, role, text))
+    if not tasks:
+        return summaries
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        futures = {ex.submit(_summarize_with_llm, t[2], t[1]): t[0] for t in tasks}
+        for fut in concurrent.futures.as_completed(futures):
+            key = futures[fut]
+            try:
+                result = fut.result()
+                if result:
+                    summaries[key] = result
+            except Exception as e:
+                logger.warning("summary future failed for %s: %s", key, e)
+    return summaries
+
+
+def _persist_summaries(decision_id: int, summaries: dict) -> None:
+    """Write summaries back into agent_decisions.raw_state under _summaries key."""
+    if not summaries:
+        return
+    conn = store.connect(_db_path())
+    row = conn.execute("SELECT raw_state FROM agent_decisions WHERE id = ?", (decision_id,)).fetchone()
+    if not row:
+        return
+    try:
+        state = json.loads(row[0] or "{}")
+    except Exception:
+        state = {}
+    state["_summaries"] = summaries
+    conn.execute(
+        "UPDATE agent_decisions SET raw_state = ? WHERE id = ?",
+        (json.dumps(state, default=str), decision_id),
+    )
+    conn.commit()
+
+
+def _build_agent_views(state: dict, decision_id: int | None = None) -> list[dict]:
+    """Per-agent: structured summary (LLM-generated, cached) + full text fallback."""
+    cached_summaries = state.get("_summaries") or {}
+
+    # If we have no cached summaries and we know the decision id, generate them.
+    if not cached_summaries and decision_id is not None:
+        cached_summaries = _summarize_decision_state(state)
+        if cached_summaries:
+            _persist_summaries(decision_id, cached_summaries)
+
+    agents = [(k, lbl, e) for k, lbl, e, _ in _AGENT_DEFS]
     views = []
     for key, label, emoji in agents:
         text = state.get(key) or ""
         if not text:
             continue
+        llm_summary = cached_summaries.get(key) or {}
+        stance = llm_summary.get("stance")
+        signal = (
+            {"label": stance, "tone": {"Bullish": "bull", "Bearish": "bear", "Neutral": "neutral"}.get(stance, "neutral")}
+            if stance
+            else _signal_from_text(text)
+        )
         views.append({
             "key": key,
             "label": label,
             "emoji": emoji,
-            "verdict": _extract_verdict(text),
-            "reasoning": _extract_reasoning(text),
-            # legacy alias
-            "summary": _extract_verdict(text),
-            "signal": _signal_from_text(text),
+            "headline": llm_summary.get("headline") or _extract_verdict(text),
+            "reason": llm_summary.get("reason") or _extract_reasoning(text),
+            "key_points": llm_summary.get("key_points") or _extract_metrics(text),
+            "verdict": llm_summary.get("headline") or _extract_verdict(text),
+            "reasoning": llm_summary.get("reason") or _extract_reasoning(text),
+            "summary": llm_summary.get("headline") or _extract_verdict(text),
+            "signal": signal,
             "metrics": _extract_metrics(text),
             "full": text,
         })
@@ -388,7 +521,7 @@ def _decision_full(conn: sqlite3.Connection, decision_id: int) -> dict | None:
     except Exception:
         state = {}
     out["state"] = state
-    out["agents"] = _build_agent_views(state)
+    out["agents"] = _build_agent_views(state, decision_id=decision_id)
     out["pm"] = _pm_summary(state)
     return out
 
