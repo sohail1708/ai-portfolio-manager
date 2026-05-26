@@ -39,11 +39,11 @@
 
     .rating-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 999px; }
     .rating-chip::before { content: ""; width: 6px; height: 6px; border-radius: 999px; }
-    .r-buy         { background: #d1fae5; color: #065f46; } .r-buy::before         { background: #059669; }
-    .r-overweight  { background: #ecfccb; color: #3f6212; } .r-overweight::before  { background: #65a30d; }
-    .r-hold        { background: #fef3c7; color: #92400e; } .r-hold::before        { background: #d97706; }
-    .r-underweight { background: #fed7aa; color: #9a3412; } .r-underweight::before { background: #ea580c; }
-    .r-sell        { background: #fee2e2; color: #991b1b; } .r-sell::before        { background: #dc2626; }
+    .r-buy   { background: #d1fae5; color: #065f46; } .r-buy::before   { background: #059669; }
+    .r-add   { background: #ecfccb; color: #3f6212; } .r-add::before   { background: #65a30d; }
+    .r-hold  { background: #fef3c7; color: #92400e; } .r-hold::before  { background: #d97706; }
+    .r-trim  { background: #fed7aa; color: #9a3412; } .r-trim::before  { background: #ea580c; }
+    .r-sell  { background: #fee2e2; color: #991b1b; } .r-sell::before  { background: #dc2626; }
 
     .tone-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 999px; }
     .tone-chip::before { content: ""; width: 5px; height: 5px; border-radius: 999px; }
@@ -274,7 +274,7 @@
               <div class="font-extrabold text-lg tracking-tight">{{ d.ticker }}</div>
               <div class="text-[10px] text-zinc-500 uppercase tracking-widest mt-0.5">tap for details</div>
             </div>
-            <span class="rating-chip r-{{ d.action|lower }}">{{ d.action|title }}</span>
+            <span class="rating-chip r-{{ d.action_class or d.action|lower }}">{{ d.action_display or d.action|title }}</span>
           </div>
           {% if d.pm and d.pm.price_target %}
           <div class="text-xs text-zinc-500 mt-3">🎯 Price target: <span class="num font-semibold text-zinc-900">${{ d.pm.price_target }}</span></div>
@@ -333,26 +333,27 @@
 
       <section>
         <h3 class="text-[11px] font-bold uppercase tracking-[0.18em] text-purple-600 mb-3">⭐ The 5 ratings</h3>
+        <p class="text-xs text-zinc-500 mb-3 italic">Action verbs — what the AI literally tells the system to do.</p>
         <div class="grid grid-cols-1 gap-2">
           <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
             <span class="rating-chip r-buy mt-0.5">Buy</span>
-            <div class="flex-1 text-zinc-700"><strong>Strong conviction long.</strong> Target 10% of NAV in this name.</div>
+            <div class="flex-1 text-zinc-700"><strong>Strong conviction.</strong> Open or build to a full 10% of NAV position.</div>
           </div>
           <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
-            <span class="rating-chip r-overweight mt-0.5">Overweight</span>
-            <div class="flex-1 text-zinc-700"><strong>Tilt toward this above benchmark, but not aggressively.</strong> Target 5% of NAV. Means "constructive, accumulate on dips."</div>
+            <span class="rating-chip r-add mt-0.5">Add</span>
+            <div class="flex-1 text-zinc-700"><strong>Lean toward this name.</strong> Build to a smaller 5% of NAV position. "Like it, but not aggressively."</div>
           </div>
           <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
             <span class="rating-chip r-hold mt-0.5">Hold</span>
-            <div class="flex-1 text-zinc-700"><strong>Neutral.</strong> No new action. Existing positions stay as-is.</div>
+            <div class="flex-1 text-zinc-700"><strong>Neutral.</strong> No action. Existing positions stay as-is.</div>
           </div>
           <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
-            <span class="rating-chip r-underweight mt-0.5">Underweight</span>
-            <div class="flex-1 text-zinc-700"><strong>Tilt away.</strong> Trim 50% of current position if held.</div>
+            <span class="rating-chip r-trim mt-0.5">Trim</span>
+            <div class="flex-1 text-zinc-700"><strong>Reduce exposure.</strong> Sell 50% of any current position in this name.</div>
           </div>
           <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
             <span class="rating-chip r-sell mt-0.5">Sell</span>
-            <div class="flex-1 text-zinc-700"><strong>Strong conviction bearish.</strong> Close the position entirely.</div>
+            <div class="flex-1 text-zinc-700"><strong>Close it.</strong> Exit the entire position.</div>
           </div>
         </div>
       </section>
@@ -426,8 +427,8 @@
       <div class="flex items-center gap-4">
         <span class="text-3xl font-extrabold tracking-tight" x-text="selected?.ticker"></span>
         <span class="rating-chip"
-              :class="'r-' + (selected?.action || 'hold').toLowerCase()"
-              x-text="(selected?.action || '').toLowerCase()"></span>
+              :class="'r-' + (selected?.action_class || 'hold')"
+              x-text="selected?.action_display || (selected?.action || '').toLowerCase()"></span>
         <span class="text-xs text-zinc-500" x-text="selected?.trade_date"></span>
       </div>
       <button @click="modalOpen = false" class="text-zinc-400 hover:text-zinc-900 text-3xl leading-none">&times;</button>
@@ -436,8 +437,8 @@
     <!-- PM verdict hero (top of modal) -->
     <div class="px-8 py-6 border-b border-zinc-200"
          :class="{
-           'bg-gradient-to-br from-bull-50 to-white': ['Buy','Overweight'].includes(selected?.pm?.rating),
-           'bg-gradient-to-br from-bear-50 to-white': ['Sell','Underweight'].includes(selected?.pm?.rating),
+           'bg-gradient-to-br from-bull-50 to-white': ['Buy','Add'].includes(selected?.pm?.rating),
+           'bg-gradient-to-br from-bear-50 to-white': ['Sell','Trim'].includes(selected?.pm?.rating),
            'bg-gradient-to-br from-neutral-50 to-white': selected?.pm?.rating === 'Hold',
            'bg-zinc-50': !selected?.pm?.rating,
          }"
@@ -450,8 +451,8 @@
           <div class="text-[10px] uppercase tracking-widest text-zinc-500">Rating</div>
           <div class="font-extrabold text-lg mt-1"
                :class="{
-                 'text-bull-700': ['Buy','Overweight'].includes(selected?.pm?.rating),
-                 'text-bear-700': ['Sell','Underweight'].includes(selected?.pm?.rating),
+                 'text-bull-700': ['Buy','Add'].includes(selected?.pm?.rating),
+                 'text-bear-700': ['Sell','Trim'].includes(selected?.pm?.rating),
                  'text-neutral-700': selected?.pm?.rating === 'Hold',
                }"
                x-text="selected?.pm?.rating || '—'"></div>
@@ -503,9 +504,15 @@
               </button>
             </div>
 
-            <!-- Take + metrics -->
-            <div class="take-label">The take</div>
-            <p class="text-sm text-zinc-900 font-medium leading-relaxed" x-text="agent.summary"></p>
+            <!-- Verdict (the call) -->
+            <div class="take-label">✅ Verdict</div>
+            <p class="text-sm text-zinc-900 font-semibold leading-relaxed" x-text="agent.verdict || '(no explicit verdict)'"></p>
+
+            <!-- Reasoning (the why) — visible by default, distinct from verdict -->
+            <div class="take-label mt-3">💭 Reasoning</div>
+            <p class="text-[13px] text-zinc-700 leading-relaxed" x-text="agent.reasoning || agent.full?.slice(0, 200)"></p>
+
+            <!-- Metric chips -->
             <div class="mt-3 flex flex-wrap gap-1.5" x-show="agent.metrics.length">
               <template x-for="m in agent.metrics">
                 <span class="metric-chip" x-text="m"></span>

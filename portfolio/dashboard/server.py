@@ -151,12 +151,33 @@ _SIGNAL_PATTERNS = [
 _SIGNAL_TO_TONE = {
     "buy": ("Bullish", "bull"),
     "overweight": ("Bullish", "bull"),
+    "add": ("Bullish", "bull"),
     "hold": ("Neutral", "neutral"),
     "underweight": ("Bearish", "bear"),
+    "trim": ("Bearish", "bear"),
     "sell": ("Bearish", "bear"),
     "bullish": ("Bullish", "bull"),
     "bearish": ("Bearish", "bear"),
+    "neutral": ("Neutral", "neutral"),
 }
+
+# Display-only relabel: upstream gives "Overweight" / "Underweight" — we
+# show action verbs because that's what they actually mean in our system.
+_RATING_DISPLAY = {
+    "buy": ("Buy", "buy"),
+    "overweight": ("Add", "add"),
+    "hold": ("Hold", "hold"),
+    "underweight": ("Trim", "trim"),
+    "sell": ("Sell", "sell"),
+}
+
+
+def display_rating(raw: str | None) -> tuple[str, str]:
+    """Return (display_text, css_class_suffix) for a raw 5-tier rating."""
+    if not raw:
+        return ("—", "hold")
+    key = raw.strip().lower()
+    return _RATING_DISPLAY.get(key, (raw.title(), key))
 
 _METRIC_PATTERNS = [
     # Order matters — most specific first.
@@ -220,6 +241,45 @@ def _extract_take(text: str | None, max_chars: int = 220) -> str:
 
 # Backwards-compat alias used elsewhere in this file.
 _summarize_agent = _extract_take
+_extract_verdict = _extract_take
+
+
+def _extract_reasoning(text: str | None, max_chars: int = 240) -> str:
+    """Pull a 1–2 sentence rationale — the *why* behind the agent's call.
+
+    Different from _extract_verdict: that one finds the decisive call
+    ("Buy" / "Bottom line: …"); this one finds an analytical sentence
+    that *explains* the call (usually the first or second paragraph).
+    """
+    if not text:
+        return ""
+    # Drop "FINAL TRANSACTION PROPOSAL: X" preamble — it's the verdict not the reason.
+    cleaned = re.sub(r"^FINAL TRANSACTION PROPOSAL.*?\n+", "", text, flags=re.I | re.S)
+    # Skip header lines (#), list markers (-, *), table lines (|), and
+    # bracket-marker lines ([2026-...]).
+    lines = [
+        l.strip()
+        for l in cleaned.split("\n")
+        if l.strip() and not l.strip().startswith(("#", "-", "*", "|", "["))
+    ]
+    if not lines:
+        return ""
+    # Walk the first few non-trivial lines; pick the first long enough one.
+    candidate = ""
+    for line in lines[:6]:
+        stripped = _strip_md(line)
+        if len(stripped) < 40:
+            continue
+        candidate = stripped
+        break
+    if not candidate:
+        candidate = _strip_md(lines[0])
+    sentences = re.split(r"(?<=[.!?])\s+", candidate)
+    # Take up to 2 sentences for a fuller "why".
+    out = " ".join(sentences[:2]) if len(sentences) > 1 else sentences[0]
+    if len(out) > max_chars:
+        out = out[: max_chars - 1].rstrip() + "…"
+    return out
 
 
 def _signal_from_text(text: str | None) -> dict:
@@ -284,7 +344,10 @@ def _build_agent_views(state: dict) -> list[dict]:
             "key": key,
             "label": label,
             "emoji": emoji,
-            "summary": _summarize_agent(text),
+            "verdict": _extract_verdict(text),
+            "reasoning": _extract_reasoning(text),
+            # legacy alias
+            "summary": _extract_verdict(text),
             "signal": _signal_from_text(text),
             "metrics": _extract_metrics(text),
             "full": text,
@@ -300,12 +363,14 @@ def _pm_summary(state: dict) -> dict:
     rating_match = re.search(r"\*?\*?Rating\*?\*?\s*[:：]\s*\*?\*?\s*(Buy|Overweight|Hold|Underweight|Sell)", text, re.I)
     summary_match = re.search(r"\*?\*?Executive Summary\*?\*?\s*[:：]\s*(.+?)(?=\n\s*\*\*|\Z)", text, re.S | re.I)
     pt_match = re.search(r"\*?\*?Price Target\*?\*?\s*[:：]\s*\$?(\d+\.?\d*)", text, re.I)
-    horizon_match = re.search(r"\*?\*?Time Horizon\*?\*?\s*[:：]\s*([^\n]+)", text, re.I)
+    raw_rating = rating_match.group(1).title() if rating_match else None
+    display, css = display_rating(raw_rating)
     return {
-        "rating": rating_match.group(1).title() if rating_match else None,
+        "rating": display,            # display label (Buy / Add / Hold / Trim / Sell)
+        "rating_raw": raw_rating,     # original upstream string
+        "rating_class": css,          # CSS class suffix
         "summary": (summary_match.group(1).strip() if summary_match else "")[:400],
         "price_target": pt_match.group(1) if pt_match else None,
-        "horizon": horizon_match.group(1).strip() if horizon_match else None,
     }
 
 
@@ -364,11 +429,14 @@ def _build_view_model() -> dict:
     positions = _positions(conn)
     decisions = _latest_decisions(conn)
 
-    # Attach full state to each decision for client-side modal
+    # Attach full state + display labels to each decision for client-side modal.
     decisions_full = []
     for d in decisions:
         full = _decision_full(conn, d["id"])
         if full:
+            disp, cls = display_rating(full.get("action"))
+            full["action_display"] = disp
+            full["action_class"] = cls
             decisions_full.append(full)
 
     if nav:
@@ -387,8 +455,8 @@ def _build_view_model() -> dict:
 
     decisions_by_rating: dict[str, int] = {}
     for d in decisions:
-        rating = (d["action"] or "Hold").title()
-        decisions_by_rating[rating] = decisions_by_rating.get(rating, 0) + 1
+        disp, _ = display_rating(d["action"])
+        decisions_by_rating[disp] = decisions_by_rating.get(disp, 0) + 1
 
     return {
         "day": _day_label(),
