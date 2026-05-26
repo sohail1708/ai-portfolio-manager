@@ -67,24 +67,41 @@
 
 <div class="max-w-7xl mx-auto px-6 py-8">
 
-  <!-- Header -->
-  <div class="flex items-start justify-between mb-8">
-    <div>
-      <div class="flex items-center gap-2 mb-1">
-        <span class="text-[11px] font-bold uppercase tracking-[0.2em] text-zinc-500">{{ day.phase }}</span>
-        {% if day.is_live %}
-        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-bear-50 text-bear-700 text-[10px] font-bold uppercase tracking-widest">
-          <span class="w-1.5 h-1.5 rounded-full bg-bear-500 animate-pulse"></span> Live
-        </span>
-        {% endif %}
+  <!-- Compact brand strip -->
+  <div class="flex items-center justify-between mb-10">
+    <div class="flex items-center gap-2">
+      <span class="text-xl">🤖</span>
+      <span class="text-xs font-bold uppercase tracking-[0.22em] text-zinc-700">AI Portfolio Manager</span>
+      {% if day.is_live %}
+      <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-bear-50 text-bear-700 text-[10px] font-bold uppercase tracking-widest">
+        <span class="w-1.5 h-1.5 rounded-full bg-bear-500 animate-pulse"></span> Live
+      </span>
+      {% endif %}
+    </div>
+    <div class="flex items-center gap-4">
+      <button @click="glossaryOpen = true" class="text-xs font-semibold text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1.5">
+        <span>ℹ️</span> How it works
+      </button>
+      <div class="text-right border-l border-zinc-200 pl-4">
+        <div class="text-[10px] uppercase tracking-[0.2em] text-zinc-500">{{ day.label }}</div>
+        <div class="text-xs text-zinc-600 mt-0.5">{{ day.sub }}</div>
       </div>
-      <h1 class="text-3xl font-extrabold tracking-tight">AI Portfolio Manager</h1>
-      <p class="text-sm text-zinc-500 mt-1">Picking 9 NASDAQ tech stocks. Can it beat QQQ for June 2026?</p>
     </div>
-    <div class="text-right">
-      <div class="text-[11px] uppercase tracking-[0.2em] text-zinc-500">{{ day.label }}</div>
-      <div class="text-sm text-zinc-600 mt-1">{{ day.sub }}</div>
-    </div>
+  </div>
+
+  <!-- BIG HERO QUESTION -->
+  <div class="text-center mb-12">
+    <h1 class="text-5xl md:text-7xl lg:text-8xl font-black tracking-tighter leading-[0.95]">
+      Can
+      <span class="bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">AI</span>
+      beat the<br/>
+      <span class="bg-gradient-to-br from-emerald-500 via-teal-500 to-cyan-500 bg-clip-text text-transparent">stock market</span>
+      in 30 days?
+    </h1>
+    <p class="mt-6 text-zinc-600 text-base md:text-lg max-w-2xl mx-auto">
+      Every weekday in June 2026, a multi-agent LLM picks 🎯 9 NASDAQ tech stocks.
+      Goal: outperform <strong class="text-zinc-900">QQQ</strong> over 30 days.
+    </p>
   </div>
 
   <!-- Hero -->
@@ -102,17 +119,44 @@
     {% endif %}
     <div class="mt-8 flex justify-center gap-12 text-sm">
       <div>
-        <div class="text-[10px] text-zinc-500 uppercase tracking-[0.2em]">Portfolio</div>
+        <div class="text-[10px] text-zinc-500 uppercase tracking-[0.2em] inline-flex items-center gap-1">
+          💼 Portfolio
+          <span x-data="{ open: false }" class="relative inline-flex">
+            <button @click.stop="open = !open" @mouseenter="open = true" @mouseleave="open = false"
+                    class="w-3.5 h-3.5 rounded-full bg-zinc-200 hover:bg-zinc-900 hover:text-white text-[9px] font-bold flex items-center justify-center transition normal-case">?</button>
+            <span x-show="open" x-cloak class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 bg-zinc-900 text-white text-xs px-3 py-2 rounded-lg shadow-xl w-56 normal-case tracking-normal font-normal text-left">
+              Total $ value of the portfolio: cash + value of all positions (the AI's picks + parked QQQ).
+            </span>
+          </span>
+        </div>
         <div class="text-2xl font-bold mt-1 num">${{ "{:,.0f}".format(hero.portfolio_value) }}</div>
       </div>
       <div class="border-l border-zinc-200"></div>
       <div>
-        <div class="text-[10px] text-zinc-500 uppercase tracking-[0.2em]">QQQ-Equivalent</div>
+        <div class="text-[10px] text-zinc-500 uppercase tracking-[0.2em] inline-flex items-center gap-1">
+          🎯 QQQ-Equivalent
+          <span x-data="{ open: false }" class="relative inline-flex">
+            <button @click.stop="open = !open" @mouseenter="open = true" @mouseleave="open = false"
+                    class="w-3.5 h-3.5 rounded-full bg-zinc-200 hover:bg-zinc-900 hover:text-white text-[9px] font-bold flex items-center justify-center transition normal-case">?</button>
+            <span x-show="open" x-cloak class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 bg-zinc-900 text-white text-xs px-3 py-2 rounded-lg shadow-xl w-56 normal-case tracking-normal font-normal text-left">
+              What we'd have if we just bought QQQ on day 1 and held. This is what we're trying to beat.
+            </span>
+          </span>
+        </div>
         <div class="text-2xl font-bold mt-1 num">${{ "{:,.0f}".format(hero.qqq_eq) }}</div>
       </div>
       <div class="border-l border-zinc-200"></div>
       <div>
-        <div class="text-[10px] text-zinc-500 uppercase tracking-[0.2em]">Alpha $</div>
+        <div class="text-[10px] text-zinc-500 uppercase tracking-[0.2em] inline-flex items-center gap-1">
+          ⚡ Alpha $
+          <span x-data="{ open: false }" class="relative inline-flex">
+            <button @click.stop="open = !open" @mouseenter="open = true" @mouseleave="open = false"
+                    class="w-3.5 h-3.5 rounded-full bg-zinc-200 hover:bg-zinc-900 hover:text-white text-[9px] font-bold flex items-center justify-center transition normal-case">?</button>
+            <span x-show="open" x-cloak class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 bg-zinc-900 text-white text-xs px-3 py-2 rounded-lg shadow-xl w-60 normal-case tracking-normal font-normal text-left">
+              Dollar amount we're ahead (or behind) of just holding QQQ. Positive = AI is winning.
+            </span>
+          </span>
+        </div>
         <div class="text-2xl font-bold mt-1 num
                     {% if hero.alpha_usd > 0 %}text-bull-600{% elif hero.alpha_usd < 0 %}text-bear-600{% endif %}">
           {% if hero.alpha_usd > 0 %}+{% endif %}${{ "{:,.0f}".format(hero.alpha_usd) }}
@@ -126,7 +170,7 @@
     <div class="card p-6 lg:col-span-2">
       <div class="flex items-center justify-between mb-5">
         <div>
-          <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">NAV vs QQQ</h3>
+          <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">📈 NAV vs QQQ</h3>
           <p class="text-sm font-semibold text-zinc-900 mt-0.5">Performance since launch</p>
         </div>
         <div class="flex items-center gap-5 text-[11px] text-zinc-600">
@@ -140,8 +184,19 @@
     </div>
 
     <div class="card p-6">
-      <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Streak</h3>
-      <p class="text-sm font-semibold text-zinc-900 mt-0.5 mb-4">Days beating QQQ</p>
+      <div class="flex items-start justify-between">
+        <div>
+          <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">🔥 Streak</h3>
+          <p class="text-sm font-semibold text-zinc-900 mt-0.5 mb-4">Days beating QQQ</p>
+        </div>
+        <span x-data="{ open: false }" class="relative inline-flex">
+          <button @click.stop="open = !open" @mouseenter="open = true" @mouseleave="open = false"
+                  class="w-4 h-4 rounded-full bg-zinc-100 hover:bg-zinc-900 hover:text-white text-[10px] font-bold flex items-center justify-center transition">?</button>
+          <span x-show="open" x-cloak class="absolute top-full mt-1 right-0 z-50 bg-zinc-900 text-white text-xs px-3 py-2 rounded-lg shadow-xl w-60 normal-case font-normal text-left">
+            Number of trading days the portfolio beat QQQ's daily return / total trading days so far.
+          </span>
+        </span>
+      </div>
       <div class="num text-6xl font-extrabold tracking-tight">
         {{ streak.days_won }}<span class="text-zinc-300">/{{ streak.days_total }}</span>
       </div>
@@ -168,7 +223,7 @@
   <!-- Row 2: Allocation + Decisions -->
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
     <div class="card p-6">
-      <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Allocation</h3>
+      <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">🥧 Allocation</h3>
       <p class="text-sm font-semibold text-zinc-900 mt-0.5 mb-4">Current positions</p>
       {% if positions %}
       <div class="h-56 relative">
@@ -192,12 +247,17 @@
     <div class="card p-6 lg:col-span-2">
       <div class="flex items-center justify-between mb-4">
         <div>
-          <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">Latest decisions</h3>
+          <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">🎯 Latest decisions</h3>
           <p class="text-sm font-semibold text-zinc-900 mt-0.5">
             {% if decisions %}{{ decisions|length }} ratings on {{ decisions[0].trade_date }}{% else %}Awaiting first run{% endif %}
           </p>
         </div>
-        <span class="text-[11px] text-zinc-400">tap any ticker →</span>
+        <div class="flex items-center gap-3">
+          <button @click="glossaryOpen = true" class="text-[11px] font-semibold text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1">
+            <span>❓</span> What do ratings mean?
+          </button>
+          <span class="text-[11px] text-zinc-400">tap any ticker →</span>
+        </div>
       </div>
       {% if decisions %}
       <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -234,6 +294,115 @@
     <a class="hover:text-zinc-700 underline" href="https://arxiv.org/abs/2412.20138">paper</a> ·
     <a class="hover:text-zinc-700 underline" href="https://github.com/sohail1708/ai-portfolio-manager">repo</a>
   </footer>
+</div>
+
+<!-- Glossary / How It Works modal -->
+<div
+  x-show="glossaryOpen"
+  x-cloak
+  x-transition.opacity.duration.150ms
+  @keydown.escape.window="glossaryOpen = false"
+  class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm"
+  @click.self="glossaryOpen = false">
+  <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-2xl scrollbar-thin"
+       x-show="glossaryOpen"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0 scale-95"
+       x-transition:enter-end="opacity-100 scale-100">
+    <div class="sticky top-0 bg-white border-b border-zinc-200 px-8 py-5 flex items-center justify-between z-10">
+      <div class="flex items-center gap-2">
+        <span class="text-2xl">📖</span>
+        <span class="text-xl font-extrabold">How it works</span>
+      </div>
+      <button @click="glossaryOpen = false" class="text-zinc-400 hover:text-zinc-900 text-3xl leading-none">&times;</button>
+    </div>
+
+    <div class="px-8 py-6 space-y-6 text-sm leading-relaxed">
+
+      <section>
+        <h3 class="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-600 mb-3">🎯 The experiment</h3>
+        <p class="text-zinc-700">
+          $100,000 paper money on Alpaca. Every weekday at 21:00 BST (market close ET),
+          a multi-agent LLM analyzes 9 NASDAQ tech stocks: <strong>AAPL · MSFT · NVDA · GOOGL · AMZN · META · TSLA · AVGO · ORCL</strong>.
+          It rates each one on a 5-tier scale and places paper trades. Idle cash auto-parks in QQQ
+          so we're never sitting in cash during a rally. After 30 days, we compare the portfolio's
+          return to QQQ's. If we beat QQQ, the AI wins. If not, it lost.
+        </p>
+      </section>
+
+      <section>
+        <h3 class="text-[11px] font-bold uppercase tracking-[0.18em] text-purple-600 mb-3">⭐ The 5 ratings</h3>
+        <div class="grid grid-cols-1 gap-2">
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
+            <span class="rating-chip r-buy mt-0.5">Buy</span>
+            <div class="flex-1 text-zinc-700"><strong>Strong conviction long.</strong> Target 10% of NAV in this name.</div>
+          </div>
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
+            <span class="rating-chip r-overweight mt-0.5">Overweight</span>
+            <div class="flex-1 text-zinc-700"><strong>Tilt toward this above benchmark, but not aggressively.</strong> Target 5% of NAV. Means "constructive, accumulate on dips."</div>
+          </div>
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
+            <span class="rating-chip r-hold mt-0.5">Hold</span>
+            <div class="flex-1 text-zinc-700"><strong>Neutral.</strong> No new action. Existing positions stay as-is.</div>
+          </div>
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
+            <span class="rating-chip r-underweight mt-0.5">Underweight</span>
+            <div class="flex-1 text-zinc-700"><strong>Tilt away.</strong> Trim 50% of current position if held.</div>
+          </div>
+          <div class="flex items-start gap-3 p-3 rounded-lg bg-zinc-50">
+            <span class="rating-chip r-sell mt-0.5">Sell</span>
+            <div class="flex-1 text-zinc-700"><strong>Strong conviction bearish.</strong> Close the position entirely.</div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h3 class="text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-600 mb-3">🤖 The 11 agents per ticker</h3>
+        <p class="text-zinc-700 mb-3">
+          For each stock, each weekday, 11 LLM agents debate before a final rating is issued:
+        </p>
+        <ul class="space-y-1.5 text-zinc-700">
+          <li><strong>4 Analysts</strong> (parallel) — Market (technicals), Sentiment (Reddit/X), News (headlines), Fundamentals (10-Q/K)</li>
+          <li><strong>2 Researchers</strong> — Bull vs Bear debate over the analyst reports</li>
+          <li><strong>1 Research Manager</strong> — synthesizes the debate into an investment plan</li>
+          <li><strong>1 Trader</strong> — proposes a transaction with sizing + stop loss</li>
+          <li><strong>3 Risk Analysts</strong> — Risky / Neutral / Safe re-debate the proposal</li>
+          <li><strong>1 Portfolio Manager</strong> — issues the final 5-tier rating</li>
+        </ul>
+        <p class="text-zinc-700 mt-3">
+          Tap any ticker card to see all 11 agents' reasoning for that stock.
+        </p>
+      </section>
+
+      <section>
+        <h3 class="text-[11px] font-bold uppercase tracking-[0.18em] text-pink-600 mb-3">📊 Key terms</h3>
+        <dl class="space-y-3">
+          <div><dt class="font-bold inline">QQQ —</dt> <dd class="inline text-zinc-700">The Invesco QQQ ETF that tracks the NASDAQ-100 index. The benchmark we're trying to beat.</dd></div>
+          <div><dt class="font-bold inline">Alpha —</dt> <dd class="inline text-zinc-700">Outperformance vs the benchmark. +1% alpha means we beat QQQ by 1%.</dd></div>
+          <div><dt class="font-bold inline">NAV —</dt> <dd class="inline text-zinc-700">Net Asset Value. Total $ value of the portfolio: cash + value of all positions.</dd></div>
+          <div><dt class="font-bold inline">Price Target —</dt> <dd class="inline text-zinc-700">What the AI thinks the stock will reach within its stated horizon.</dd></div>
+          <div><dt class="font-bold inline">Horizon —</dt> <dd class="inline text-zinc-700">How long the AI expects to hold the position (typical: 3–18 months).</dd></div>
+          <div><dt class="font-bold inline">RSI —</dt> <dd class="inline text-zinc-700">Relative Strength Index. Above 70 = overbought; below 30 = oversold.</dd></div>
+        </dl>
+      </section>
+
+      <section>
+        <h3 class="text-[11px] font-bold uppercase tracking-[0.18em] text-orange-600 mb-3">⚙️ Why this might fail</h3>
+        <p class="text-zinc-700">
+          Beating QQQ for one month is a coin-flip even for professional managers. Most active strategies
+          fail to beat the index over short windows. This is an honest experiment, not a guaranteed win.
+          Either result is interesting: if AI wins, that's a portfolio piece. If it loses,
+          <em>"I gave an AI $100k and it still couldn't beat NASDAQ"</em> is great content too.
+        </p>
+      </section>
+
+      <p class="text-xs text-zinc-400 pt-4 border-t border-zinc-100">
+        Built on <a class="underline hover:text-zinc-700" href="https://github.com/TauricResearch/TradingAgents">TradingAgents v0.2.4</a>
+        (<a class="underline hover:text-zinc-700" href="https://arxiv.org/abs/2412.20138">paper</a>) ·
+        <a class="underline hover:text-zinc-700" href="https://github.com/sohail1708/ai-portfolio-manager">source</a>
+      </p>
+    </div>
+  </div>
 </div>
 
 <!-- Decision modal -->
@@ -335,6 +504,7 @@
   function dashboardApp() {
     return {
       modalOpen: false,
+      glossaryOpen: false,
       selected: null,
       openDecision(id) {
         this.selected = decisions.find(d => d.id === id);
@@ -343,7 +513,10 @@
       },
       init() {
         this.$watch('modalOpen', open => {
-          document.body.style.overflow = open ? 'hidden' : '';
+          document.body.style.overflow = (open || this.glossaryOpen) ? 'hidden' : '';
+        });
+        this.$watch('glossaryOpen', open => {
+          document.body.style.overflow = (open || this.modalOpen) ? 'hidden' : '';
         });
       },
     };
