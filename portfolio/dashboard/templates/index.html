@@ -53,9 +53,13 @@
 
     .metric-chip { display: inline-block; padding: 2px 8px; background: #f4f4f5; color: #52525b; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; }
 
-    .agent-card { border: 1px solid #e4e4e7; border-radius: 12px; transition: all 200ms ease; }
+    .agent-card { border: 1px solid #e4e4e7; border-left: 4px solid #d4d4d8; border-radius: 12px; transition: all 200ms ease; background: #fff; }
     .agent-card:hover { border-color: #a1a1aa; }
-    .agent-full { font-size: 13px; line-height: 1.7; color: #3f3f46; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+    .agent-card.stance-bull    { background: #f0fdf4; border-left-color: #10b981; }
+    .agent-card.stance-bear    { background: #fef2f2; border-left-color: #ef4444; }
+    .agent-card.stance-neutral { background: #fffbeb; border-left-color: #f59e0b; }
+    .agent-full { font-size: 13px; line-height: 1.7; color: #3f3f46; white-space: pre-wrap; max-height: 400px; overflow-y: auto; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.05); margin-top: 12px; }
+    .take-label { font-size: 10px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: #71717a; margin-bottom: 4px; }
 
     [x-cloak] { display: none !important; }
     .scrollbar-thin::-webkit-scrollbar { width: 8px; }
@@ -273,10 +277,7 @@
             <span class="rating-chip r-{{ d.action|lower }}">{{ d.action|title }}</span>
           </div>
           {% if d.pm and d.pm.price_target %}
-          <div class="text-xs text-zinc-500 mt-3">Price target: <span class="num font-semibold text-zinc-900">${{ d.pm.price_target }}</span></div>
-          {% endif %}
-          {% if d.pm and d.pm.horizon %}
-          <div class="text-xs text-zinc-500">Horizon: <span class="font-medium text-zinc-700">{{ d.pm.horizon }}</span></div>
+          <div class="text-xs text-zinc-500 mt-3">🎯 Price target: <span class="num font-semibold text-zinc-900">${{ d.pm.price_target }}</span></div>
           {% endif %}
         </button>
         {% endfor %}
@@ -433,18 +434,31 @@
     </div>
 
     <!-- PM verdict hero (top of modal) -->
-    <div class="px-8 py-6 bg-gradient-to-br from-zinc-50 to-white border-b border-zinc-200" x-show="selected?.pm">
-      <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 mb-2">Portfolio Manager — final verdict</div>
-      <p class="text-base leading-relaxed text-zinc-800 mb-4" x-text="selected?.pm?.summary"></p>
+    <div class="px-8 py-6 border-b border-zinc-200"
+         :class="{
+           'bg-gradient-to-br from-bull-50 to-white': ['Buy','Overweight'].includes(selected?.pm?.rating),
+           'bg-gradient-to-br from-bear-50 to-white': ['Sell','Underweight'].includes(selected?.pm?.rating),
+           'bg-gradient-to-br from-neutral-50 to-white': selected?.pm?.rating === 'Hold',
+           'bg-zinc-50': !selected?.pm?.rating,
+         }"
+         x-show="selected?.pm">
+      <div class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 mb-2">✅ Portfolio Manager — final verdict</div>
+      <p class="text-base leading-relaxed text-zinc-800 mb-5" x-text="selected?.pm?.summary"></p>
 
       <div class="grid grid-cols-3 gap-4 text-sm">
         <div>
           <div class="text-[10px] uppercase tracking-widest text-zinc-500">Rating</div>
-          <div class="font-bold mt-1" x-text="selected?.pm?.rating || '—'"></div>
+          <div class="font-extrabold text-lg mt-1"
+               :class="{
+                 'text-bull-700': ['Buy','Overweight'].includes(selected?.pm?.rating),
+                 'text-bear-700': ['Sell','Underweight'].includes(selected?.pm?.rating),
+                 'text-neutral-700': selected?.pm?.rating === 'Hold',
+               }"
+               x-text="selected?.pm?.rating || '—'"></div>
         </div>
         <div>
           <div class="text-[10px] uppercase tracking-widest text-zinc-500">Price Target</div>
-          <div class="font-bold mt-1 num">
+          <div class="font-extrabold text-lg mt-1 num">
             <template x-if="selected?.pm?.price_target">
               <span x-text="'$' + selected.pm.price_target"></span>
             </template>
@@ -452,8 +466,9 @@
           </div>
         </div>
         <div>
-          <div class="text-[10px] uppercase tracking-widest text-zinc-500">Horizon</div>
-          <div class="font-medium mt-1 text-sm" x-text="selected?.pm?.horizon || '—'"></div>
+          <div class="text-[10px] uppercase tracking-widest text-zinc-500">Our Hold Window</div>
+          <div class="font-bold mt-1 text-sm">30 days max</div>
+          <div class="text-[10px] text-zinc-500 mt-0.5">(June 2026 only)</div>
         </div>
       </div>
     </div>
@@ -464,31 +479,41 @@
 
       <div class="space-y-3">
         <template x-for="agent in (selected?.agents || [])" :key="agent.key">
-          <div class="agent-card p-4" x-data="{ expanded: false }">
-            <div class="flex items-start justify-between gap-3">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1.5">
-                  <span class="text-base" x-text="agent.emoji"></span>
-                  <span class="font-bold text-sm" x-text="agent.label"></span>
-                  <template x-if="agent.signal && agent.signal.label">
-                    <span class="tone-chip" :class="'t-' + agent.signal.tone" x-text="agent.signal.label"></span>
-                  </template>
-                </div>
-                <p class="text-sm text-zinc-700 leading-relaxed" x-text="agent.summary"></p>
-                <div class="mt-2 flex flex-wrap gap-1.5" x-show="agent.metrics.length">
-                  <template x-for="m in agent.metrics">
-                    <span class="metric-chip" x-text="m"></span>
-                  </template>
-                </div>
+          <div class="agent-card p-4"
+               :class="agent.signal && agent.signal.tone ? 'stance-' + agent.signal.tone : ''"
+               x-data="{ expanded: false }">
+
+            <!-- Header row: emoji + name + stance chip -->
+            <div class="flex items-center justify-between gap-3 mb-3">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-base" x-text="agent.emoji"></span>
+                <span class="font-bold text-sm" x-text="agent.label"></span>
+                <template x-if="agent.signal && agent.signal.label">
+                  <span class="tone-chip" :class="'t-' + agent.signal.tone" x-text="agent.signal.label"></span>
+                </template>
+                <template x-if="!(agent.signal && agent.signal.label)">
+                  <span class="tone-chip t-neutral">—</span>
+                </template>
               </div>
               <button
                 @click="expanded = !expanded"
-                class="text-[11px] font-semibold text-zinc-500 hover:text-zinc-900 whitespace-nowrap uppercase tracking-wider">
+                class="text-[11px] font-semibold text-zinc-500 hover:text-zinc-900 whitespace-nowrap uppercase tracking-wider shrink-0">
                 <span x-show="!expanded">Read full ▼</span>
                 <span x-show="expanded">Collapse ▲</span>
               </button>
             </div>
-            <div x-show="expanded" x-transition class="agent-full mt-4 pt-4 border-t border-zinc-100" x-text="agent.full"></div>
+
+            <!-- Take + metrics -->
+            <div class="take-label">The take</div>
+            <p class="text-sm text-zinc-900 font-medium leading-relaxed" x-text="agent.summary"></p>
+            <div class="mt-3 flex flex-wrap gap-1.5" x-show="agent.metrics.length">
+              <template x-for="m in agent.metrics">
+                <span class="metric-chip" x-text="m"></span>
+              </template>
+            </div>
+
+            <!-- Full text (collapsible) -->
+            <div x-show="expanded" x-transition class="agent-full" x-text="agent.full"></div>
           </div>
         </template>
       </div>

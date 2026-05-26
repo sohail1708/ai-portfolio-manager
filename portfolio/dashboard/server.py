@@ -169,26 +169,57 @@ _METRIC_PATTERNS = [
 ]
 
 
-def _summarize_agent(text: str | None, max_chars: int = 180) -> str:
-    """Pick the first informative sentence as a punchline."""
+def _strip_md(s: str) -> str:
+    """Strip simple markdown bold/italic markers."""
+    s = re.sub(r"\*{1,3}([^*\n]+?)\*{1,3}", r"\1", s)
+    s = re.sub(r"`([^`]+?)`", r"\1", s)
+    return s.strip()
+
+
+def _extract_take(text: str | None, max_chars: int = 220) -> str:
+    """Find the most decisive sentence — the agent's actual call, not just the lead.
+
+    Tries explicit verdict markers first (Bottom line, Conclusion, Final
+    transaction proposal, Action, Recommendation, etc.), then falls back to
+    a short first informative line.
+    """
     if not text:
         return ""
-    cleaned = text.strip()
-    # Drop "FINAL TRANSACTION PROPOSAL: BUY/SELL/HOLD" preamble if it leads.
-    cleaned = re.sub(r"^FINAL TRANSACTION PROPOSAL.*?\n+", "", cleaned, flags=re.I | re.S)
-    # Drop markdown title lines.
-    lines = [l for l in cleaned.split("\n") if l.strip() and not l.strip().startswith("#")]
+    # Look for an explicit verdict line, in priority order.
+    patterns = [
+        r"(?:^|\n)\s*\*{0,2}(?:Bottom line|Bottom-line|Conclusion|Final verdict|The bottom line)\*{0,2}\s*[:：]?\s*\*{0,2}(.+?)(?=\n\n|\n\s*\*\*|\Z)",
+        r"FINAL TRANSACTION PROPOSAL\s*[:：]\s*\*{0,2}\s*(.+?)(?=\n|\Z)",
+        r"\*{0,2}(?:Recommendation|Action|Trading Implication)\*{0,2}\s*[:：]\s*\*{0,2}\s*(.+?)(?=\n\n|\n\s*\*\*|\Z)",
+        r"\*{0,2}Practical (?:trading )?view\*{0,2}\s*[:：]?\s*(.+?)(?=\n\n|\n\s*\*\*|\Z)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.I | re.S)
+        if m:
+            line = _strip_md(m.group(1).strip())
+            # Trim to first sentence if multi-sentence.
+            parts = re.split(r"(?<=[.!?])\s+", line, maxsplit=1)
+            line = parts[0] if parts else line
+            line = line.strip().rstrip(".") + "."
+            if len(line) > max_chars:
+                line = line[: max_chars - 1].rstrip() + "…"
+            if 12 < len(line):
+                return line
+
+    # Fallback: first informative non-header sentence.
+    cleaned = re.sub(r"^FINAL TRANSACTION PROPOSAL.*?\n+", "", text, flags=re.I | re.S)
+    lines = [l for l in cleaned.split("\n") if l.strip() and not l.strip().startswith(("#", "-", "*", "|"))]
     if not lines:
         return ""
-    first = lines[0].strip()
-    # Drop bold/italic markers around the line.
-    first = re.sub(r"\*\*?(.+?)\*\*?", r"\1", first)
-    # Take the first sentence if it's long.
+    first = _strip_md(lines[0])
     parts = re.split(r"(?<=[.!?])\s+", first, maxsplit=1)
     out = parts[0] if parts else first
     if len(out) > max_chars:
         out = out[: max_chars - 1].rstrip() + "…"
     return out
+
+
+# Backwards-compat alias used elsewhere in this file.
+_summarize_agent = _extract_take
 
 
 def _signal_from_text(text: str | None) -> dict:
@@ -202,8 +233,8 @@ def _signal_from_text(text: str | None) -> dict:
             if verdict in _SIGNAL_TO_TONE:
                 label, tone = _SIGNAL_TO_TONE[verdict]
                 return {"label": label, "tone": tone, "raw": verdict.title()}
-    # Fallback: scan for first 5-tier rating word that appears.
-    for word in ("Buy", "Overweight", "Hold", "Underweight", "Sell"):
+    # Fallback: scan for first stance word that appears (broader vocabulary).
+    for word in ("Buy", "Overweight", "Hold", "Underweight", "Sell", "Bullish", "Bearish", "Neutral"):
         if re.search(rf"\b{word}\b", text):
             label, tone = _SIGNAL_TO_TONE[word.lower()]
             return {"label": label, "tone": tone, "raw": word}
