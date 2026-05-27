@@ -135,21 +135,48 @@ def park_idle_cash(
     park_ticker: str | None = None,
     threshold: float = CASH_PARK_THRESHOLD,
 ) -> None:
-    """If cash > threshold, buy the park ticker (default QQQ) with the excess."""
+    """If cash > threshold, buy the park ticker (default QQQ) with the excess.
+
+    Critical: the park amount must NOT include cash that's already committed
+    to pending buy orders submitted earlier in the same run. Otherwise we'd
+    over-commit cash (e.g., $40k of pending stock buys + a $79k park against
+    $80k cash → some orders bounce at next open).
+
+    We compute available cash as `cash - sum(open buy notional)` and park
+    ~95% of that, leaving a small float for slippage / partial fills.
+    """
     park_ticker = park_ticker or os.environ.get(
         "PORTFOLIO_CASH_PARK_TICKER", DEFAULT_CASH_PARK_TICKER
     )
     account = alpaca.get_account()
-    if account.cash < threshold:
+
+    # Subtract any pending buy commitments so the park doesn't compete with
+    # orders submitted earlier in this same daily run.
+    try:
+        open_orders = alpaca.list_open_orders()
+    except Exception as e:
+        print(f"[scheduler] could not fetch open orders, falling back to cash: {e!r}")
+        open_orders = []
+    committed = sum(
+        (o.get("notional") or 0)
+        for o in open_orders
+        if o.get("side") == "buy"
+    )
+    available = max(0.0, account.cash - committed)
+
+    if available < threshold:
         print(
-            f"[scheduler] cash ${account.cash:,.2f} below threshold "
-            f"${threshold:,.0f}; no park needed."
+            f"[scheduler] available cash ${available:,.2f} "
+            f"(cash ${account.cash:,.2f} − pending buys ${committed:,.2f}) "
+            f"below threshold ${threshold:,.0f}; no park needed."
         )
         return
 
-    notional = round(account.cash * 0.99, 2)  # leave a tiny float for fees
+    # 95% leaves room for slippage / partial fills of the sibling stock buys.
+    notional = round(available * 0.95, 2)
     print(
-        f"[scheduler] parking ${notional:,.2f} of idle cash in {park_ticker}..."
+        f"[scheduler] parking ${notional:,.2f} of idle cash in {park_ticker} "
+        f"(cash ${account.cash:,.2f} − pending buys ${committed:,.2f} = ${available:,.2f} available)..."
     )
     trade_id = store.log_trade(
         conn,
