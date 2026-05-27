@@ -25,6 +25,9 @@ from portfolio.run_live import run_one
 from portfolio.state import store
 
 DEFAULT_CRON = "0 16 * * 1-5"
+# Market opens 09:30 ET; poll a few minutes later so submitted-overnight orders
+# have a chance to fill before we update the DB and dashboard.
+DEFAULT_OPEN_CRON = "35 9 * * 1-5"
 DEFAULT_UNIVERSE = "AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,AVGO,ORCL"
 DEFAULT_CASH_PARK_TICKER = "QQQ"
 # Park idle cash in QQQ above this $-threshold so we don't underperform from
@@ -187,6 +190,48 @@ def _index_close_for(ticker: str, iso_date: str) -> float | None:
     return float(hist["Close"].iloc[0])
 
 
+def morning_fills_job() -> None:
+    """Post-open: re-poll yesterday's queued orders and refresh positions.
+
+    Runs ~5 min after the 09:30 ET open. The previous evening's market-close
+    orders (submitted ~16:00 ET) sit in 'accepted' overnight and fill at open,
+    so the DB and positions snapshot are stale until we re-poll here.
+    """
+    today = date.today().isoformat()
+    print(f"\n[scheduler] === morning fills job for {today} ===")
+    db_path = os.environ.get("PORTFOLIO_DB_PATH", "./portfolio_state.db")
+    conn = store.connect(db_path)
+    store.init_schema(conn)
+
+    alpaca = AlpacaClient(paper=True)
+    # Give late fills extra time — same poll loop as EOD but longer budget.
+    settle_pending_orders(alpaca, conn, max_wait_s=180)
+
+    # Refresh positions snapshot (overwrites today's row via UPSERT). Skip
+    # NAV row here so we don't clobber yesterday's EOD close prices — full
+    # EOD snapshot at 16:00 ET will write today's NAV row.
+    positions = alpaca.get_positions()
+    store.snapshot_positions(
+        conn,
+        snapshot_date=today,
+        positions=[
+            {
+                "ticker": p.ticker,
+                "qty": p.qty,
+                "avg_entry_price": p.avg_entry_price,
+                "market_value": p.market_value,
+                "unrealized_pl": p.unrealized_pl,
+            }
+            for p in positions
+        ],
+    )
+    account = alpaca.get_account()
+    print(
+        f"[scheduler] morning refresh: positions={len(positions)} "
+        f"cash=${account.cash:,.2f} equity=${account.equity:,.2f}"
+    )
+
+
 def daily_job(*, dry_run: bool = False) -> None:
     today = date.today().isoformat()
     print(f"\n[scheduler] === daily run for {today} (dry_run={dry_run}) ===")
@@ -211,17 +256,14 @@ def daily_job(*, dry_run: bool = False) -> None:
     snapshot_eod(alpaca, conn, today)
 
 
-def start_scheduler(cron_expr: str | None = None) -> None:
-    from apscheduler.schedulers.blocking import BlockingScheduler
+def _cron_trigger(expr: str):
     from apscheduler.triggers.cron import CronTrigger
 
-    cron_expr = cron_expr or os.environ.get("PORTFOLIO_RUN_CRON", DEFAULT_CRON)
-    parts = cron_expr.split()
+    parts = expr.split()
     if len(parts) != 5:
-        raise ValueError(f"PORTFOLIO_RUN_CRON must be a 5-field cron expr, got: {cron_expr!r}")
+        raise ValueError(f"cron expr must have 5 fields, got: {expr!r}")
     minute, hour, dom, month, dow = parts
-
-    trigger = CronTrigger(
+    return CronTrigger(
         minute=minute,
         hour=hour,
         day=dom,
@@ -229,10 +271,31 @@ def start_scheduler(cron_expr: str | None = None) -> None:
         day_of_week=dow,
         timezone="America/New_York",
     )
+
+
+def start_scheduler(
+    cron_expr: str | None = None, open_cron_expr: str | None = None
+) -> None:
+    from apscheduler.schedulers.blocking import BlockingScheduler
+
+    cron_expr = cron_expr or os.environ.get("PORTFOLIO_RUN_CRON", DEFAULT_CRON)
+    open_cron_expr = open_cron_expr or os.environ.get(
+        "PORTFOLIO_OPEN_CRON", DEFAULT_OPEN_CRON
+    )
+
     sched = BlockingScheduler()
-    sched.add_job(daily_job, trigger=trigger, id="daily_run", max_instances=1)
+    sched.add_job(
+        daily_job, trigger=_cron_trigger(cron_expr), id="daily_run", max_instances=1
+    )
+    sched.add_job(
+        morning_fills_job,
+        trigger=_cron_trigger(open_cron_expr),
+        id="morning_fills",
+        max_instances=1,
+    )
     print(
-        f"[scheduler] daemon started; cron='{cron_expr}' (America/New_York). "
+        f"[scheduler] daemon started; daily_run='{cron_expr}' "
+        f"morning_fills='{open_cron_expr}' (America/New_York). "
         "Press Ctrl-C to stop."
     )
     sched.start()
@@ -247,8 +310,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Run today's job once and exit (instead of starting the cron daemon).",
     )
     parser.add_argument("--dry-run", action="store_true", help="Skip Alpaca calls.")
+    parser.add_argument(
+        "--morning-fills",
+        action="store_true",
+        help="Run only the post-open fills-polling + positions-refresh job and exit.",
+    )
     args = parser.parse_args(argv)
 
+    if args.morning_fills:
+        morning_fills_job()
+        return 0
     if args.once:
         daily_job(dry_run=args.dry_run)
         return 0
