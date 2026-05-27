@@ -124,6 +124,16 @@ def _build_buy(
     ctx: TranslatorContext,
     cfg: TranslatorConfig,
 ) -> OrderIntent | None:
+    """Size the position to the rating's target weight.
+
+    Sizing rule: rating IS the target weight.
+      - Buy        → top up to 10% of NAV
+      - Overweight → top up to 5% of NAV
+    If the current position is already at or above the rating's target, no-op
+    (waiting for a stronger rating or a Trim/Sell). The max_position_pct_nav
+    cap is still enforced as an absolute upper bound, but it's no longer the
+    auto-escalation target on repeat ratings.
+    """
     if ctx.nav <= 0:
         return None
 
@@ -139,13 +149,13 @@ def _build_buy(
         cfg.buy_pct_nav if rating == "Buy" else cfg.overweight_pct_nav
     )
     target_value = target_pct * ctx.nav
-    cap_value = cfg.max_position_pct_nav * ctx.nav
 
     if current_value >= target_value:
-        notional = max(0.0, cap_value - current_value)
-    else:
-        notional = target_value - current_value
+        # Already at or above the rating's target. Wait for a stronger rating
+        # (e.g., Overweight → Buy) or for the position to drift below target.
+        return None
 
+    notional = target_value - current_value
     notional = min(notional, ctx.buying_power)
 
     if notional < cfg.min_trade_notional:
