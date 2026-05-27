@@ -106,6 +106,26 @@ class AlpacaClient:
         order = self._trading.get_order_by_id(alpaca_order_id)
         return _to_order_result(order)
 
+    def list_open_orders(self) -> list[dict]:
+        """List orders not yet filled/canceled. Returns plain dicts for the dashboard."""
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+
+        req = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=50)
+        orders = self._trading.get_orders(filter=req)
+        out = []
+        for o in orders:
+            out.append({
+                "ticker": o.symbol,
+                "side": str(o.side.value).lower(),
+                "qty": float(o.qty) if o.qty else None,
+                "notional": float(o.notional) if o.notional else None,
+                "status": str(o.status.value).lower(),
+                "submitted_at": o.submitted_at.isoformat() if o.submitted_at else None,
+                "order_id": str(o.id),
+            })
+        return out
+
     def cancel_order(self, alpaca_order_id: str) -> None:
         self._trading.cancel_order_by_id(alpaca_order_id)
 

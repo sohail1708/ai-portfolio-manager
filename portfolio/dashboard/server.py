@@ -39,6 +39,10 @@ _jinja = Environment(
 LAUNCH_DATE = date(2026, 6, 1)
 END_DATE = date(2026, 6, 30)
 TOTAL_DAYS = 30
+UNIVERSE = [
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "ORCL"
+]
+CASH_PARK_TICKER = "QQQ"
 
 app = FastAPI(title="AI Portfolio Manager — vs QQQ")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
@@ -535,6 +539,46 @@ def _positions(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _live_alpaca_state() -> dict:
+    """Pull live cash + open orders from Alpaca. Returns {} on failure."""
+    try:
+        from portfolio.executor.alpaca_client import AlpacaClient
+        client = AlpacaClient(paper=True)
+        acct = client.get_account()
+        orders = client.list_open_orders()
+        return {
+            "cash": acct.cash,
+            "equity": acct.equity,
+            "buying_power": acct.buying_power,
+            "portfolio_value": acct.portfolio_value,
+            "open_orders": orders,
+        }
+    except Exception as e:
+        logger.warning("live Alpaca fetch failed: %s", e)
+        return {}
+
+
+def _fill_missing_universe(decisions: list[dict]) -> list[dict]:
+    """Show all 9 universe tickers; mark ones missing for the latest date as 'errored'."""
+    present = {d["ticker"]: d for d in decisions}
+    out = []
+    for ticker in UNIVERSE:
+        if ticker in present:
+            out.append(present[ticker])
+        else:
+            out.append({
+                "id": None,
+                "ticker": ticker,
+                "trade_date": decisions[0]["trade_date"] if decisions else None,
+                "action": None,
+                "action_display": "No decision",
+                "action_class": "errored",
+                "errored": True,
+                "pm": {},
+            })
+    return out
+
+
 def _build_view_model() -> dict:
     starting_cash = _starting_cash()
     db_path = _db_path()
@@ -571,6 +615,14 @@ def _build_view_model() -> dict:
             full["action_display"] = disp
             full["action_class"] = cls
             decisions_full.append(full)
+
+    # Pad with placeholder entries for any universe ticker missing for this date.
+    decisions_full = _fill_missing_universe(decisions_full)
+
+    # Live Alpaca state (cash + pending orders).
+    live = _live_alpaca_state()
+    live_cash = live.get("cash")
+    open_orders = live.get("open_orders") or []
 
     if nav:
         latest = nav[-1]
@@ -612,9 +664,16 @@ def _build_view_model() -> dict:
         ],
         "streak": _compute_streak(nav),
         "positions": positions,
+        "cash": live_cash,
+        "open_orders": open_orders,
+        "open_orders_total": sum(
+            (o.get("notional") or 0) for o in open_orders
+        ),
         "decisions": decisions_full,
         "decisions_json": json.dumps(decisions_full, default=str),
         "decisions_by_rating": decisions_by_rating,
+        "universe": UNIVERSE,
+        "cash_park_ticker": CASH_PARK_TICKER,
     }
 
 
@@ -622,6 +681,12 @@ def _build_view_model() -> dict:
 async def index(request: Request):
     vm = _build_view_model()
     html = _jinja.get_template("index.html").render(**vm)
+    return HTMLResponse(html)
+
+
+@app.get("/architecture", response_class=HTMLResponse)
+async def architecture():
+    html = _jinja.get_template("architecture.html").render()
     return HTMLResponse(html)
 
 

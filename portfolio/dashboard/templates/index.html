@@ -44,6 +44,7 @@
     .r-hold  { background: #fef3c7; color: #92400e; } .r-hold::before  { background: #d97706; }
     .r-trim  { background: #fed7aa; color: #9a3412; } .r-trim::before  { background: #ea580c; }
     .r-sell  { background: #fee2e2; color: #991b1b; } .r-sell::before  { background: #dc2626; }
+    .r-errored { background: #f4f4f5; color: #71717a; } .r-errored::before { background: #a1a1aa; }
 
     .tone-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border-radius: 999px; }
     .tone-chip::before { content: ""; width: 5px; height: 5px; border-radius: 999px; }
@@ -83,6 +84,9 @@
       {% endif %}
     </div>
     <div class="flex items-center gap-4">
+      <a href="/architecture" class="text-xs font-semibold text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1.5">
+        <span>🧠</span> Architecture
+      </a>
       <button @click="glossaryOpen = true" class="text-xs font-semibold text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1.5">
         <span>ℹ️</span> How it works
       </button>
@@ -228,8 +232,8 @@
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
     <div class="card p-6">
       <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">🥧 Allocation</h3>
-      <p class="text-sm font-semibold text-zinc-900 mt-0.5 mb-4">Current positions</p>
-      {% if positions %}
+      <p class="text-sm font-semibold text-zinc-900 mt-0.5 mb-4">Current positions + cash</p>
+      {% if positions or cash %}
       <div class="h-56 relative">
         <canvas id="allocChart"></canvas>
       </div>
@@ -240,6 +244,14 @@
           <span class="text-zinc-500 num text-xs">${{ "{:,.0f}".format(p.market_value or 0) }}</span>
         </div>
         {% endfor %}
+        {% if cash %}
+        <div class="flex justify-between items-center text-sm pt-2 border-t border-zinc-100">
+          <span class="font-bold text-zinc-600 inline-flex items-center gap-1.5">
+            💵 Cash <span class="text-[10px] font-normal text-zinc-400 normal-case">(unallocated)</span>
+          </span>
+          <span class="text-zinc-500 num text-xs">${{ "{:,.0f}".format(cash) }}</span>
+        </div>
+        {% endif %}
       </div>
       {% else %}
       <div class="h-56 flex items-center justify-center text-zinc-400 italic text-sm">
@@ -266,6 +278,18 @@
       {% if decisions %}
       <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
         {% for d in decisions %}
+        {% if d.errored %}
+        <div class="text-left p-4 agent-card bg-zinc-50 opacity-70 cursor-not-allowed" title="Agent run failed for this ticker — no decision logged for this date.">
+          <div class="flex items-start justify-between mb-2">
+            <div>
+              <div class="font-extrabold text-lg tracking-tight text-zinc-500">{{ d.ticker }}</div>
+              <div class="text-[10px] text-zinc-400 uppercase tracking-widest mt-0.5">no decision today</div>
+            </div>
+            <span class="rating-chip r-errored">⚠ failed</span>
+          </div>
+          <div class="text-[11px] text-zinc-400 mt-3 italic">Agent run errored. Will retry tomorrow.</div>
+        </div>
+        {% else %}
         <button
           @click="openDecision({{ d.id }})"
           class="text-left p-4 card-hover agent-card bg-white">
@@ -280,6 +304,7 @@
           <div class="text-xs text-zinc-500 mt-3">🎯 Price target: <span class="num font-semibold text-zinc-900">${{ d.pm.price_target }}</span></div>
           {% endif %}
         </button>
+        {% endif %}
         {% endfor %}
       </div>
       {% else %}
@@ -289,6 +314,63 @@
       {% endif %}
     </div>
   </div>
+
+  <!-- Pending orders panel -->
+  {% if open_orders %}
+  <div class="card p-6 mb-6">
+    <div class="flex items-start justify-between mb-4">
+      <div>
+        <h3 class="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">⏳ Pending orders</h3>
+        <p class="text-sm font-semibold text-zinc-900 mt-0.5">
+          {{ open_orders|length }} order{{ '' if open_orders|length == 1 else 's' }} queued ·
+          <span class="num">${{ "{:,.0f}".format(open_orders_total) }}</span> total
+        </p>
+        <p class="text-[11px] text-zinc-500 mt-1 italic">
+          Submitted after market close. Fill at next open (14:30 BST / 09:30 ET).
+        </p>
+      </div>
+      <span x-data="{ open: false }" class="relative inline-flex">
+        <button @click.stop="open = !open" @mouseenter="open = true" @mouseleave="open = false"
+                class="w-4 h-4 rounded-full bg-zinc-100 hover:bg-zinc-900 hover:text-white text-[10px] font-bold flex items-center justify-center transition">?</button>
+        <span x-show="open" x-cloak class="absolute top-full mt-1 right-0 z-50 bg-zinc-900 text-white text-xs px-3 py-2 rounded-lg shadow-xl w-64 normal-case font-normal text-left">
+          The 21:00 BST cron runs after market close, so orders sit in 'accepted' overnight and fill the next morning at open. After fill, they move to the Positions panel.
+        </span>
+      </span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-[10px] uppercase tracking-widest text-zinc-500 border-b border-zinc-200">
+          <tr>
+            <th class="text-left py-2 px-2">Ticker</th>
+            <th class="text-left py-2 px-2">Side</th>
+            <th class="text-right py-2 px-2">Notional</th>
+            <th class="text-left py-2 px-2">Status</th>
+            <th class="text-left py-2 px-2 hidden md:table-cell">Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in open_orders %}
+          <tr class="border-b border-zinc-100">
+            <td class="py-2 px-2 font-bold">{{ o.ticker }}</td>
+            <td class="py-2 px-2">
+              <span class="tone-chip {% if o.side == 'buy' %}t-bull{% else %}t-bear{% endif %}">{{ o.side|upper }}</span>
+            </td>
+            <td class="py-2 px-2 text-right num">
+              {% if o.notional %}${{ "{:,.0f}".format(o.notional) }}{% elif o.qty %}{{ o.qty }} sh{% else %}—{% endif %}
+            </td>
+            <td class="py-2 px-2">
+              <span class="tone-chip t-neutral">{{ o.status }}</span>
+            </td>
+            <td class="py-2 px-2 text-xs text-zinc-500 hidden md:table-cell">
+              {% if o.ticker == cash_park_ticker %}🅿️ idle-cash park{% else %}from agent decision{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
 
   <footer class="mt-12 text-center text-xs text-zinc-400">
     Forked from <a class="hover:text-zinc-700 underline" href="https://github.com/TauricResearch/TradingAgents">TradingAgents</a> v0.2.4 ·
@@ -532,6 +614,7 @@
   const decisions = {{ decisions_json | safe }};
   const navSeries = {{ nav_series | tojson }};
   const positions = {{ positions | tojson }};
+  const liveCash = {{ cash | tojson if cash is not none else 'null' }};
 
   function dashboardApp() {
     return {
@@ -598,21 +681,36 @@
     }
 
     const allocCanvas = document.getElementById('allocChart');
-    if (allocCanvas && positions.length) {
+    if (allocCanvas && (positions.length || liveCash)) {
       const withValue = positions.filter(p => p.market_value);
+      const labels = withValue.map(p => p.ticker);
+      const data = withValue.map(p => p.market_value);
+      const colors = ['#2563eb', '#7c3aed', '#0891b2', '#16a34a', '#ca8a04', '#dc2626', '#ea580c', '#db2777', '#475569'];
+      if (liveCash && liveCash > 1) {
+        labels.push('Cash');
+        data.push(liveCash);
+        colors.push('#a1a1aa');
+      }
       new Chart(allocCanvas, {
         type: 'doughnut',
         data: {
-          labels: withValue.map(p => p.ticker),
+          labels,
           datasets: [{
-            data: withValue.map(p => p.market_value),
-            backgroundColor: ['#2563eb', '#7c3aed', '#0891b2', '#16a34a', '#ca8a04', '#dc2626', '#ea580c', '#db2777', '#475569'],
+            data,
+            backgroundColor: colors,
             borderWidth: 2,
             borderColor: '#fff',
           }],
         },
         options: {
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: ctx => `${ctx.label}: $${ctx.raw.toLocaleString(undefined, {maximumFractionDigits: 0})}`,
+              },
+            },
+          },
           cutout: '70%',
         },
       });
