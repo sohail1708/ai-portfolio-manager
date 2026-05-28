@@ -559,8 +559,16 @@ def _live_alpaca_state() -> dict:
 
 
 def _fill_missing_universe(decisions: list[dict]) -> list[dict]:
-    """Show all 9 universe tickers; mark ones missing for the latest date as 'errored'."""
+    """Show all 9 universe tickers; mark ones missing for the latest date as 'errored'.
+
+    If `decisions` is empty (DB has no rows yet — pre-launch state), return
+    empty so the dashboard shows the friendly "Awaiting first run" placeholder
+    instead of 9 confusing 'failed' ghost cards.
+    """
+    if not decisions:
+        return []
     present = {d["ticker"]: d for d in decisions}
+    trade_date = decisions[0]["trade_date"]
     out = []
     for ticker in UNIVERSE:
         if ticker in present:
@@ -569,7 +577,7 @@ def _fill_missing_universe(decisions: list[dict]) -> list[dict]:
             out.append({
                 "id": None,
                 "ticker": ticker,
-                "trade_date": decisions[0]["trade_date"] if decisions else None,
+                "trade_date": trade_date,
                 "action": None,
                 "action_display": "No decision",
                 "action_class": "errored",
