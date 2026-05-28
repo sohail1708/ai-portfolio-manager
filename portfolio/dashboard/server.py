@@ -36,8 +36,8 @@ _jinja = Environment(
     autoescape=select_autoescape(["html"]),
 )
 
-LAUNCH_DATE = date(2026, 6, 1)
-END_DATE = date(2026, 6, 30)
+LAUNCH_DATE = date(2026, 5, 29)
+END_DATE = date(2026, 6, 27)
 TOTAL_DAYS = 30
 UNIVERSE = [
     "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "ORCL"
