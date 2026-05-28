@@ -69,11 +69,17 @@ def _trading_days_between(start_exclusive: date, end_exclusive: date) -> int:
 def _day_label() -> dict:
     today = date.today()
     if today < LAUNCH_DATE:
-        n = _trading_days_between(today, LAUNCH_DATE)
+        cal_days = (LAUNCH_DATE - today).days
+        if cal_days == 1:
+            label = "Eve"
+            sub = "Day 1 starts tomorrow at 21:00 BST"
+        else:
+            label = f"T-{cal_days}"
+            sub = f"{cal_days} day{'s' if cal_days != 1 else ''} until launch"
         return {
-            "label": f"T-{n}",
-            "phase": "Test phase",
-            "sub": f"{n} trading day{'s' if n != 1 else ''} until June 1 launch",
+            "label": label,
+            "phase": "Pre-launch",
+            "sub": sub,
             "is_live": False,
         }
     if today > END_DATE:
